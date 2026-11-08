@@ -1,0 +1,6 @@
+{
+  "name": "Oportuniza | Araucária",
+  "description": "Plataforma completa para vagas, cursos, mentoria e desenvolvimento de carreira em Araucária.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
