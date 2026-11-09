@@ -39,6 +39,7 @@ export interface User {
   notificationsEnabled?: boolean;
   marketingEmailsEnabled?: boolean;
   tiJobsPushEnabled?: boolean;
+  is2FAEnabled?: boolean;
   isAdmin?: boolean;
   isBlocked?: boolean;
   blockReason?: string;

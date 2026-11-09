@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Menu, User as UserIcon, Briefcase, GraduationCap, ChevronRight, Award, LogOut, CheckCircle, Lock, ShieldAlert, Sparkles, Bell } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Menu, User as UserIcon, Briefcase, GraduationCap, ChevronRight, Award, LogOut, CheckCircle, CheckCircle2, Lock, ShieldAlert, Sparkles, Bell, Search, MapPin, Play, BookOpen, Star, FileText, ArrowRight, ExternalLink, Headphones, X, Download, Phone, Mail, Building } from 'lucide-react';
 import { ScreenId, User, Job, Application, Course, Enrollment, UserCourseProgress } from './types';
 import { mockJobs, mockCourses, loadJobsFromSupabase, loadCoursesFromSupabase } from './data';
 import { supabase } from './lib/supabaseClient';
@@ -15,6 +15,7 @@ import BioScreen from './components/BioScreen';
 import UserAuthScreens from './components/UserAuthScreens';
 import AuthScreen from './components/AuthScreen';
 import AdminPanelScreen from './components/AdminPanelScreen';
+import Admin2FAScreen from './components/Admin2FAScreen';
 import CompanyDashboardScreen from './components/CompanyDashboardScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import JobsSection from './components/JobsSection';
@@ -39,6 +40,7 @@ export default function App() {
   const [history, setHistory] = useState<ScreenId[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin2FAVerified, setIsAdmin2FAVerified] = useState(false);
   const [activePerk, setActivePerk] = useState<string | null>(null);
   const [jobsVersion, setJobsVersion] = useState(0);
   const [blockedNotice, setBlockedNotice] = useState<{ email: string; name?: string; reason?: string } | null>(null);
@@ -71,6 +73,8 @@ export default function App() {
   const [courses, setCourses] = useState<Course[]>(() => [...mockCourses]);
 
   const [completedCourses, setCompletedCourses] = useState<UserCourseProgress[]>([]);
+  const [homeSearchQuery, setHomeSearchQuery] = useState('');
+  const [jobSearchFilter, setJobSearchFilter] = useState('');
 
   const fetchUserData = useCallback(async () => {
     if (!user?.id || user.isAdmin) return;
@@ -212,8 +216,7 @@ export default function App() {
             user.role?.toLowerCase() === 'administrador' ||
             user.role?.toLowerCase() === 'admin' ||
             user.cargo?.toLowerCase() === 'administrador' ||
-            user.email?.toLowerCase() === 'pedroorchel12@gmail.com' ||
-            user.email?.toLowerCase() === 'orchel@gmail.com'
+            user.email?.toLowerCase() === 'oportunizahw@gmail.com'
           )
         );
 
@@ -247,8 +250,33 @@ export default function App() {
   // Details navigation state
   const [detailJob, setDetailJob] = useState<Job | null>(null);
   const [detailCourse, setDetailCourse] = useState<Course | null>(null);
-  const [settingsTabType, setSettingsTabType] = useState<'profile' | 'settings' | 'favorites' | 'applications' | 'enrollments' | 'completed'>('settings');
+  const [settingsTabType, setSettingsTabType] = useState<'profile' | 'settings' | 'favorites' | 'applications' | 'enrollments' | 'completed' | 'cv'>('settings');
   const [focusedJob, setFocusedJob] = useState<Job | null>(null);
+  
+  // Real-time matching jobs for search bar live dropdown preview
+  const matchedLiveJobs = useMemo(() => {
+    const q = homeSearchQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return mockJobs.filter(
+      (j) =>
+        j.title.toLowerCase().includes(q) ||
+        j.company.toLowerCase().includes(q) ||
+        (j.location || '').toLowerCase().includes(q) ||
+        (j.description || '').toLowerCase().includes(q)
+    ).slice(0, 4);
+  }, [homeSearchQuery]);
+
+  const handleHomeSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setJobSearchFilter(homeSearchQuery.trim());
+    handleScreenNavigation('jobs');
+  };
+
+  const handleQuickTagClick = (tag: string) => {
+    setHomeSearchQuery(tag);
+    setJobSearchFilter(tag);
+    handleScreenNavigation('jobs');
+  };
   
   // Unread messages context counts
   const [unreadMessages, setUnreadMessages] = useState(1);
@@ -506,7 +534,7 @@ export default function App() {
                 data?.isAdmin ||
                 data?.role === 'Administrador' ||
                 data?.cargo === 'Administrador' ||
-                cleanEmail === 'pedroorchel12@gmail.com'
+                cleanEmail === 'oportunizahw@gmail.com'
               );
 
               // Accurately determine if the user is a Company account
@@ -725,6 +753,7 @@ export default function App() {
     setFavorites([]);
     setCompletedCourses([]);
     setHistory([]);
+    setIsAdmin2FAVerified(false);
     setCurrentScreen('landing');
   };
 
@@ -1307,7 +1336,6 @@ export default function App() {
           <p className="text-xs font-bold text-gray-400 animate-pulse tracking-widest uppercase">Sincronizando...</p>
         </div>
       )}
-      <div className="device-notch"></div>
       <div className="app-container relative bg-[var(--bg-light)] select-none text-[var(--text-main)]">
         
         {/* Drawer Sidebar */}
@@ -1319,6 +1347,7 @@ export default function App() {
           unreadCount={unreadMessages}
           user={user}
           onSignOut={handleSignOut}
+          applicationsCount={applications.length}
         />
 
         {/* Main Core Router */}
@@ -1371,13 +1400,24 @@ export default function App() {
             />
           )}
 
-          {/* Admin Panel (Complete Workspace) */}
+          {/* Admin Panel (Guarded by 2FA) */}
           {user && (user.isAdmin || currentScreen === 'admin') && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel Administrativo">
-              <AdminPanelScreen 
-                user={user}
-                onLogout={handleSignOut}
-              />
+              {!isAdmin2FAVerified ? (
+                <Admin2FAScreen
+                  user={user}
+                  onVerified={() => setIsAdmin2FAVerified(true)}
+                  onCancel={() => {
+                    setIsAdmin2FAVerified(false);
+                    setCurrentScreen('home');
+                  }}
+                />
+              ) : (
+                <AdminPanelScreen 
+                  user={user}
+                  onLogout={handleSignOut}
+                />
+              )}
             </ErrorBoundary>
           )}
 
@@ -1397,216 +1437,708 @@ export default function App() {
             <>
               {/* Home */}
               {currentScreen === 'home' && (
-            <div className="w-full h-full overflow-y-auto custom-scroll px-5 py-6 bg-gradient-to-b from-blue-50/70 to-white pb-6 flex flex-col gap-5 animate-fadeIn">
+            <div className="w-full h-full overflow-y-auto custom-scroll px-4 sm:px-6 md:px-8 py-5 md:py-8 bg-slate-100/60 dark:bg-slate-950 pb-20 flex flex-col items-center animate-fadeIn text-slate-900 dark:text-slate-100">
               
-              {/* Nav Header */}
-              <header className="flex justify-between items-center shrink-0">
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  className="p-2.5 rounded-full bg-white hover:bg-gray-100 transition-colors shadow-sm text-gray-700 cursor-pointer"
-                  aria-label="Abrir menu"
-                >
-                  <Menu className="w-5 h-5" />
-                </button>
+              <div className="w-full max-w-6xl flex flex-col gap-6">
 
-                {user.avatarUrl ? (
-                  <img
-                    src={user.avatarUrl}
-                    alt="Sua foto de perfil"
-                    className={`w-8 h-8 rounded-full object-cover border shadow-sm ${
-                      activePerk === 'gold_border_avatar'
-                        ? 'border-yellow-400 ring-2 ring-yellow-400'
-                        : 'border-[#6C63FF]/20'
-                    }`}
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                    activePerk === 'gold_border_avatar'
-                      ? 'bg-yellow-400/20 text-yellow-600 border border-yellow-400 ring-2 ring-yellow-400'
-                      : 'bg-[#6C63FF]/10 text-[#6C63FF] border border-[#6C63FF]/20'
-                  }`}>
-                    {user.name.substring(0, 1).toUpperCase()}
+                {/* Top Nav Header */}
+                <header className="flex justify-between items-center shrink-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md px-4 py-3 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setSidebarOpen(true)}
+                      className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-800 dark:text-slate-100 cursor-pointer font-semibold text-xs shrink-0"
+                      aria-label="Abrir menu"
+                    >
+                      <Menu className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                      <span>Menu</span>
+                    </button>
+
+                    <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block" />
+
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden shadow-2xs flex items-center justify-center p-0.5 shrink-0">
+                        <img 
+                          src="https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png" 
+                          alt="Oportuniza Araucária" 
+                          className="w-full h-full object-contain" 
+                        />
+                      </div>
+                      <div className="flex flex-col leading-tight">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          Oportuniza Araucária
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+                          Portal de Emprego & Qualificação
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </header>
 
-              {/* Welcome banner user info */}
-              <div className="flex items-center gap-3">
-                {/* Profile icon simulation (No broken images!) */}
-                {user.avatarUrl ? (
-                  <img
-                    src={user.avatarUrl}
-                    alt="Sua foto"
-                    className={`w-12 h-12 rounded-2xl object-cover shrink-0 shadow-sm ${
-                      activePerk === 'gold_border_avatar'
-                        ? 'border-yellow-400 ring-2 ring-yellow-400'
-                        : 'border-primary/20'
-                    }`}
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold font-sans text-2xl shrink-0 ${
-                    activePerk === 'gold_border_avatar'
-                      ? 'bg-yellow-400/15 text-yellow-600 border border-yellow-400 ring-2 ring-yellow-400'
-                      : 'bg-primary/10 text-primary border border-primary/20'
-                  }`}>
-                    {user.name.substring(0, 2).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <span className="text-xs uppercase font-bold tracking-wider text-gray-400 block leading-none">Bem-vindo(a),</span>
-                  <h2 className="text-lg font-bold text-gray-900 mt-1 tracking-tight truncate leading-tight">
-                    {user.name}
-                  </h2>
-                </div>
-              </div>
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <button
+                      onClick={() => handleScreenNavigation('map')}
+                      className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-cyan-500" />
+                      <span>Mapa de Vagas</span>
+                    </button>
 
-              {/* Status Alert Banner for Candidates when Company changes status to Entrevista or Aprovado */}
-              {applications.some(app => (app.status || '').toLowerCase().includes('entrevista') || (app.status || '').toLowerCase().includes('aprovad')) && (
-                <div className="flex flex-col gap-2.5 mt-1 select-none animate-fadeIn">
-                  {applications
-                    .filter(app => (app.status || '').toLowerCase().includes('entrevista') || (app.status || '').toLowerCase().includes('aprovad'))
-                    .map((app) => {
-                      const isApproved = (app.status || '').toLowerCase().includes('aprovad');
-                      return (
-                        <div
-                          key={app.id}
-                          onClick={() => handleScreenNavigation('applications')}
-                          className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:scale-[1.01] flex items-start gap-3.5 relative overflow-hidden ${
-                            isApproved
-                              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-emerald-400/40 shadow-emerald-500/10'
-                              : 'bg-gradient-to-r from-blue-600 to-[#52A8C7] text-white border-blue-400/40 shadow-blue-500/10'
-                          }`}
-                        >
-                          <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0">
-                            <Sparkles className="w-5 h-5 text-yellow-300 animate-pulse" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-white/25 px-2.5 py-0.5 rounded-full">
-                                {isApproved ? '🎉 Você foi Aprovado(a)!' : '🎉 Convite para Entrevista!'}
-                              </span>
-                              <span className="text-[10px] text-white/80 font-mono">Processo Ativo</span>
-                            </div>
-                            <p className="text-xs font-bold mt-1.5 text-white leading-snug">
-                              {isApproved
-                                ? `Parabéns! A empresa ${app.company} aprovou sua candidatura para a vaga "${app.jobTitle}"!`
-                                : `Parabéns! A empresa ${app.company} selecionou seu currículo para entrevista na vaga "${app.jobTitle}"!`}
-                            </p>
-                            <p className="text-[11px] text-white/85 mt-1 leading-tight">
-                              {isApproved
-                                ? 'Aguarde as orientações da empresa para envio de documentos e início.'
-                                : 'Fique atento ao WhatsApp e telefone informados. A empresa entrará em contato para agendar o horário.'}
-                            </p>
-                            <div className="flex items-center gap-1 mt-2.5 text-[11px] font-extrabold text-white underline decoration-white/50 hover:decoration-white">
-                              <span>Acompanhar candidatura</span>
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </div>
-                          </div>
+                    <button
+                      onClick={() => handleScreenNavigation('messages')}
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-600 dark:text-slate-300 relative cursor-pointer"
+                      aria-label="Mensagens"
+                    >
+                      <Bell className="w-4 h-4" />
+                      {unreadMessages > 0 && (
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-800" />
+                      )}
+                    </button>
+
+                    <button 
+                      onClick={() => {
+                        setSettingsTabType('profile');
+                        handleScreenNavigation('profile');
+                      }}
+                      className="cursor-pointer flex items-center gap-2 pl-2 sm:pl-3 pr-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-left group"
+                      title="Abrir Meu Perfil e Currículo"
+                    >
+                      {user.avatarUrl ? (
+                        <img
+                          src={user.avatarUrl}
+                          alt="Sua foto de perfil"
+                          className="w-7 h-7 rounded-lg object-cover border border-slate-200 dark:border-slate-600 shadow-2xs"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-7 h-7 rounded-lg bg-cyan-700 text-white font-bold text-xs flex items-center justify-center shadow-2xs">
+                          {user.name.substring(0, 1).toUpperCase()}
                         </div>
-                      );
-                    })}
-                </div>
-              )}
-              
-              {/* Quick access Stat Cards Grid (Vagas / Cursos) */}
-              <div className="grid grid-cols-2 gap-3 mt-1 select-none">
-                <div
-                  onClick={() => handleScreenNavigation('jobs')}
-                  className="cursor-pointer bg-white rounded-[20px] p-6 flex items-center gap-4 border border-gray-100 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 min-h-[92px]"
-                >
-                  <div className="p-3 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                    <Briefcase className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <span className="text-lg font-bold text-gray-800 block">Vagas</span>
-                  </div>
-                </div>
-
-                <div
-                  onClick={() => handleScreenNavigation('courses')}
-                  className="cursor-pointer bg-white rounded-[20px] p-6 flex items-center gap-4 border border-gray-100 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 min-h-[92px]"
-                >
-                  <div className="p-3 rounded-xl bg-teal-500/10 text-teal-600 flex items-center justify-center">
-                    <GraduationCap className="w-6 h-6 text-teal-600" />
-                  </div>
-                  <div>
-                    <span className="text-lg font-bold text-gray-800 block">Cursos</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Profile completion percentage card summary or CIEE promotion if 100% */}
-              {calculateCompletionPercent() < 100 ? (
-                <>
-                  <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-3 font-sans">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="font-semibold text-gray-500">Progresso do Perfil</span>
-                      <strong className="text-primary font-bold font-mono text-sm">{calculateCompletionPercent()}%</strong>
-                    </div>
-                    
-                    <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-primary h-full transition-all duration-300" style={{ width: `${calculateCompletionPercent()}%` }} />
-                    </div>
-
-                    <p className="text-xs text-gray-500 leading-normal">
-                      Complete seu perfil para receber melhores recomendações de vagas e capacitações de TI.
-                    </p>
-
-                    <div className="flex gap-2.5 mt-1 border-t border-gray-50 pt-3">
-                      <button
-                        onClick={() => handleScreenNavigation('settings')}
-                        className="flex-1 btn-secondary text-sm py-2 rounded-xl font-bold cursor-pointer"
-                      >
-                        Ajustar Alertas
-                      </button>
-                      <button
-                        onClick={() => handleScreenNavigation('profile')}
-                        className="flex-1 btn-primary text-sm py-2 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        Editar Perfil
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 mt-4">
-                    <span className="text-[11px] font-bold text-gray-400 font-mono tracking-wider px-1 uppercase">Capacitação em Destaque</span>
-                    <div 
-                      onClick={() => handleScreenNavigation('courses')}
-                      className="bg-indigo-50/30 border border-indigo-100/50 p-4 rounded-2xl flex items-center gap-3 hover:bg-indigo-50/60 transition-colors cursor-pointer group"
-                    >
-                      <div className="p-2 rounded-xl bg-indigo-100 text-indigo-600">
-                        <Award className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                      )}
+                      <div className="hidden sm:flex flex-col leading-none">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors truncate max-w-[120px]">
+                          {user.name.split(' ')[0]}
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Meu Perfil & CV</span>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <strong className="text-sm font-bold text-gray-800 block truncate">Novidades de Estágio no CIEE</strong>
-                        <p className="text-[11px] text-gray-500 leading-tight mt-0.5">Vagas de jovem menor aprendiz abertas essa semana. Inscreva-se!</p>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-gray-400" />
-                    </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition-transform hidden sm:block" />
+                    </button>
                   </div>
-                </>
-              ) : (
-                <div className="flex flex-col gap-4">
+                </header>
+
+                {/* Hero Showcase Banner with Real Search */}
+                <div className="relative rounded-3xl overflow-visible border border-[#16364D] dark:border-slate-800 bg-[#0B1E2D] dark:bg-slate-900 text-white p-6 sm:p-8 flex flex-col gap-6 shadow-sm">
                   <div className="flex flex-col gap-2">
-                    <span className="text-xs font-bold text-gray-400 font-mono tracking-wider px-1 uppercase">Oportunidades em Destaque</span>
-                    <div 
-                      onClick={() => handleScreenNavigation('jobs')}
-                      className="bg-[#f0f4ff]/50 border border-indigo-100/40 p-4 rounded-2xl flex items-center gap-3 shadow-inner hover:bg-indigo-50/50 transition-colors cursor-pointer"
-                    >
-                      <div className="p-2 rounded-xl bg-indigo-100 text-indigo-600">
+                    <div className="flex items-center gap-2 text-cyan-300 text-xs font-semibold">
+                      <Building className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span>Prefeitura de Araucária · Secretaria Municipal de Trabalho e Emprego</span>
+                    </div>
+
+                    <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-white max-w-2xl leading-tight">
+                      Olá, {user.name}! Encontre sua próxima oportunidade em Araucária
+                    </h1>
+
+                    <p className="text-xs sm:text-sm text-slate-300 max-w-xl leading-relaxed">
+                      Mais de 120 vagas de emprego CLT, estágios, jovem aprendiz e cursos profissionalizantes gratuitos para impulsionar seu currículo.
+                    </p>
+                  </div>
+
+                  {/* Real Interactive Search Form inside Hero */}
+                  <form onSubmit={handleHomeSearchSubmit} className="relative z-20 flex flex-col gap-2.5">
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-2 sm:p-2.5 shadow-xl flex items-center gap-2 border border-slate-200 dark:border-slate-800 transition-all focus-within:ring-2 focus-within:ring-cyan-500">
+                      <div className="p-2 sm:p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-400 shrink-0">
+                        <Search className="w-4 h-4" />
+                      </div>
+                      <input
+                        type="text"
+                        value={homeSearchQuery}
+                        onChange={(e) => setHomeSearchQuery(e.target.value)}
+                        placeholder="Qual cargo ou empresa você procura? (ex: Produção, Soldador, TI, Farmácia, Estágio...)"
+                        className="w-full bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden py-1 px-1"
+                      />
+                      {homeSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setHomeSearchQuery('')}
+                          className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                          aria-label="Limpar pesquisa"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="px-4 py-2 sm:py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shrink-0 transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span>Buscar Vagas</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Live Preview Dropdown when typing */}
+                    {homeSearchQuery.trim().length >= 2 && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden z-50 text-slate-900 dark:text-slate-100 animate-fadeIn">
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            Sugestões encontradas para &ldquo;{homeSearchQuery}&rdquo;
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            {matchedLiveJobs.length} {matchedLiveJobs.length === 1 ? 'vaga' : 'vagas'}
+                          </span>
+                        </div>
+
+                        {matchedLiveJobs.length > 0 ? (
+                          <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto">
+                            {matchedLiveJobs.map((job) => (
+                              <div
+                                key={job.id}
+                                onClick={() => {
+                                  setDetailJob(job);
+                                  setDetailCourse(null);
+                                  handleScreenNavigation('details');
+                                }}
+                                className="p-3 hover:bg-cyan-50/50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer flex items-center justify-between gap-3 text-left"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shrink-0">
+                                    {job.logo ? (
+                                      <img src={job.logo} alt={job.company} className="w-full h-full object-cover rounded" />
+                                    ) : (
+                                      <Briefcase className="w-4 h-4 text-slate-400" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                                      {job.title}
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                      {job.company} · {job.location || 'Araucária'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-xs font-bold text-cyan-600 dark:text-cyan-400 block">
+                                    {job.salary || 'A combinar'}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">{job.type || 'CLT'}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                            Nenhuma vaga específica com o termo &ldquo;{homeSearchQuery}&rdquo;. Pressione <strong>Buscar Vagas</strong> para ver todas as opções disponíveis.
+                          </div>
+                        )}
+
+                        <div className="p-2.5 bg-slate-50 dark:bg-slate-800/40 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                          <button
+                            type="submit"
+                            className="font-bold text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Ver todas as vagas para &ldquo;{homeSearchQuery}&rdquo;</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setHomeSearchQuery('')}
+                            className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                          >
+                            Fechar sugestões
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Popular filter suggestions */}
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                      <span className="text-slate-300 text-[11px] font-medium mr-0.5">Buscas frequentes:</span>
+                      {['Auxiliar de Produção', 'Estágio / Aprendiz', 'Logística', 'Atendente', 'Soldador', 'Motorista'].map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => handleQuickTagClick(tag)}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] transition-colors cursor-pointer border border-white/10"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </form>
+
+                  {/* 3 Real-time KPI Metric Badges */}
+                  <div className="relative z-10 grid grid-cols-3 gap-3 pt-4 border-t border-white/10 text-center sm:text-left">
+                    <div className="flex flex-col">
+                      <span className="text-lg sm:text-2xl font-black text-white tabular-nums tracking-tight">120+</span>
+                      <span className="text-[11px] text-slate-300">Vagas em Aberto</span>
+                    </div>
+                    <div className="flex flex-col border-l border-white/10 pl-3 sm:pl-4">
+                      <span className="text-lg sm:text-2xl font-black text-white tabular-nums tracking-tight">{applications.length}</span>
+                      <span className="text-[11px] text-slate-300">Minhas Candidaturas</span>
+                    </div>
+                    <div className="flex flex-col border-l border-white/10 pl-3 sm:pl-4">
+                      <span className="text-lg sm:text-2xl font-black text-white tabular-nums tracking-tight">{enrollments.length}</span>
+                      <span className="text-[11px] text-slate-300">Cursos Matriculados</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Candidacy Status Alert (Interview or Approved) */}
+                {applications.some(app => (app.status || '').toLowerCase().includes('entrevista') || (app.status || '').toLowerCase().includes('aprovad')) && (
+                  <div className="flex flex-col gap-2.5 select-none">
+                    {applications
+                      .filter(app => (app.status || '').toLowerCase().includes('entrevista') || (app.status || '').toLowerCase().includes('aprovad'))
+                      .map((app) => {
+                        const isApproved = (app.status || '').toLowerCase().includes('aprovad');
+                        return (
+                          <div
+                            key={app.id}
+                            onClick={() => handleScreenNavigation('applications')}
+                            className="p-4 sm:p-5 rounded-2xl border border-emerald-300 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-100 cursor-pointer transition-all hover:shadow-md flex items-start gap-4 shadow-xs"
+                          >
+                            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                              <CheckCircle className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+                                {isApproved ? '🎉 Candidatura Aprovada!' : '🔔 Chamada para Entrevista de Emprego!'}
+                              </span>
+                              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                                {isApproved
+                                  ? `A empresa ${app.company} aprovou você para a vaga "${app.jobTitle}".`
+                                  : `A empresa ${app.company} selecionou você para entrevista na vaga "${app.jobTitle}".`}
+                              </p>
+                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                                {isApproved
+                                  ? 'Aguarde as orientações da equipe de RH para envio de documentos.'
+                                  : 'Fique atento ao WhatsApp e telefone informados. A equipe de recrutamento entrará em contato.'}
+                              </p>
+                            </div>
+                            <ChevronRight className="w-5 h-5 text-emerald-700 dark:text-emerald-400 shrink-0 mt-2" />
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+
+                {/* 4 Quick Action Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 select-none">
+                  <div
+                    onClick={() => handleScreenNavigation('jobs')}
+                    className="cursor-pointer bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-cyan-400/50 dark:hover:border-cyan-500/50 transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/40 text-cyan-600 dark:text-cyan-400 border border-cyan-100 dark:border-cyan-800/40">
                         <Briefcase className="w-5 h-5" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <strong className="text-base font-bold text-gray-800 block truncate">Novas Vagas de TI</strong>
-                        <p className="text-xs text-gray-500 leading-tight mt-0.5">Confira as vagas mais recentes adicionadas à plataforma.</p>
+                      <span className="text-xs font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/50 px-2 py-0.5 rounded-lg border border-cyan-100 dark:border-cyan-900/50">
+                        120+ Vagas
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
+                        Vagas de Emprego
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Oportunidades CLT, estágio e aprendiz nas empresas de Araucária.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-600 dark:text-cyan-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <span>Acessar Vagas</span>
+                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => handleScreenNavigation('courses')}
+                    className="cursor-pointer bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-emerald-400/50 dark:hover:border-emerald-500/50 transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800/40">
+                        <GraduationCap className="w-5 h-5" />
                       </div>
-                      <ChevronRight className="w-4 h-4 text-gray-400" />
+                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-lg border border-emerald-100 dark:border-emerald-900/50">
+                        Certificado Grátis
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                        Cursos Gratuitos
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Qualificação profissional prática com certificado emitido em PDF.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <span>Explorar Cursos</span>
+                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => handleScreenNavigation('applications')}
+                    className="cursor-pointer bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-indigo-400/50 dark:hover:border-indigo-500/50 transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/40">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
+                        {applications.length} Enviadas
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                        Minhas Candidaturas
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Acompanhe o andamento dos processos seletivos e retorno do RH.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <span>Acompanhar Status</span>
+                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => handleScreenNavigation('mentor')}
+                    className="cursor-pointer bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-amber-400/50 dark:hover:border-amber-500/50 transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-800/40">
+                        <Sparkles className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-lg border border-amber-100 dark:border-amber-900/50">
+                        Treino de RH
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                        Simulador de Entrevista
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Pratique respostas com perguntas reais de recrutadores locais.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <span>Iniciar Simulado</span>
+                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                     </div>
                   </div>
                 </div>
-              )}
+
+                {/* Main 2-Column Responsive Split */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                  {/* Left Column (2 Cols wide on Desktop: Jobs & Courses) */}
+                  <div className="lg:col-span-2 flex flex-col gap-6">
+
+                    {/* Vagas Recentes em Araucária */}
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col gap-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                          <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                            Vagas Recentes em Araucária
+                          </h2>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Oportunidades abertas nas indústrias e comércios locais
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleScreenNavigation('jobs')}
+                          className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Ver todas as 120+</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col gap-3">
+                        {mockJobs.slice(0, 3).map((job) => (
+                          <div
+                            key={job.id}
+                            onClick={() => {
+                              setDetailJob(job);
+                              setDetailCourse(null);
+                              handleScreenNavigation('details');
+                            }}
+                            className="p-4 rounded-xl border border-slate-200/70 dark:border-slate-800/80 hover:border-cyan-400 dark:hover:border-cyan-600 transition-all cursor-pointer bg-slate-50/50 dark:bg-slate-800/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                              <div className="w-11 h-11 rounded-xl overflow-hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shrink-0 shadow-2xs">
+                                {job.logo ? (
+                                  <img src={job.logo} alt={job.company} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Briefcase className="w-5 h-5 text-slate-400" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors truncate">
+                                  {job.title}
+                                </h3>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                  <span className="font-semibold text-slate-700 dark:text-slate-300">{job.company}</span>
+                                  <span>·</span>
+                                  <span>{job.location || 'Araucária'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60 dark:border-slate-700/60 shrink-0">
+                              <div className="text-left sm:text-right">
+                                <span className="block text-xs font-bold text-slate-900 dark:text-white">
+                                  {job.salary || 'A combinar'}
+                                </span>
+                                <span className="text-[11px] text-slate-400">{job.type || 'CLT'}</span>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDetailJob(job);
+                                  setDetailCourse(null);
+                                  handleScreenNavigation('details');
+                                }}
+                                className="px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition-colors shrink-0 cursor-pointer"
+                              >
+                                Ver Detalhes
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Cursos Gratuitos em Destaque */}
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col gap-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                          <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                            Qualificação Gratuita em Araucária
+                          </h2>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Cursos práticos com certificado em PDF para valorizar seu currículo
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleScreenNavigation('courses')}
+                          className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Ver todos os cursos</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {courses.filter((c: any) => c.active !== false).slice(0, 2).map((course) => (
+                          <div
+                            key={course.id}
+                            onClick={() => {
+                              setDetailCourse(course);
+                              setDetailJob(null);
+                              handleScreenNavigation('details');
+                            }}
+                            className="p-4 rounded-xl border border-slate-200/70 dark:border-slate-800/80 hover:border-emerald-400 dark:hover:border-emerald-600 transition-all cursor-pointer bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between gap-3 group"
+                          >
+                            <div className="flex items-start gap-3.5">
+                              {course.coverImage ? (
+                                <img
+                                  src={course.coverImage}
+                                  alt={course.title}
+                                  className="w-20 h-14 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0 shadow-2xs"
+                                />
+                              ) : (
+                                <div className="w-20 h-14 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center shrink-0 text-emerald-600">
+                                  <GraduationCap className="w-6 h-6" />
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
+                                  {course.category || 'Capacitação'}
+                                </span>
+                                <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors line-clamp-1 mt-0.5">
+                                  {course.title}
+                                </h3>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
+                                  {course.desc || 'Curso prático com certificado'}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                              <span className="text-slate-500 dark:text-slate-400">{course.duration || 'Gratuito'}</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                <span>Acessar Curso</span>
+                                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Right Column (1 Col wide on Desktop: Profile, CIEE & Support) */}
+                  <div className="lg:col-span-1 flex flex-col gap-6">
+
+                    {/* Dedicated Meu Perfil Card */}
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col gap-4">
+                      <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="relative shrink-0">
+                            {user.avatarUrl ? (
+                              <img
+                                src={user.avatarUrl}
+                                alt={user.name}
+                                className="w-12 h-12 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 shadow-2xs"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-2xl bg-cyan-700 text-white font-black text-base flex items-center justify-center shadow-2xs">
+                                {user.name.substring(0, 1).toUpperCase()}
+                              </div>
+                            )}
+                            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900" title="Perfil ativo" />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                              {user.name}
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                              {user.email}
+                            </p>
+                            <span className="inline-block mt-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200/50 dark:border-emerald-800/40">
+                              Candidato Ativo em Araucária
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar & Strength */}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            Força do Currículo
+                          </span>
+                          <span className="font-mono font-black text-cyan-600 dark:text-cyan-400">
+                            {calculateCompletionPercent()}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-cyan-600 h-full transition-all duration-500 rounded-full"
+                            style={{ width: `${calculateCompletionPercent()}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Status checklist */}
+                      <div className="flex flex-col gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className={`w-3.5 h-3.5 ${user.phone ? 'text-emerald-500' : 'text-slate-300 dark:text-slate-600'}`} />
+                          <span className={user.phone ? 'text-slate-700 dark:text-slate-200 font-medium' : ''}>
+                            {user.phone ? `WhatsApp: ${user.phone}` : 'Adicionar WhatsApp para contato'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className={`w-3.5 h-3.5 ${user.education ? 'text-emerald-500' : 'text-slate-300 dark:text-slate-600'}`} />
+                          <span className={user.education ? 'text-slate-700 dark:text-slate-200 font-medium' : ''}>
+                            {user.education ? user.education : 'Informar escolaridade'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className={`w-3.5 h-3.5 ${user.skills && user.skills.length > 0 ? 'text-emerald-500' : 'text-slate-300 dark:text-slate-600'}`} />
+                          <span className={user.skills && user.skills.length > 0 ? 'text-slate-700 dark:text-slate-200 font-medium' : ''}>
+                            {user.skills && user.skills.length > 0 ? `${user.skills.length} habilidades informadas` : 'Cadastrar habilidades profissionais'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 3 Clear Action Buttons */}
+                      <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          onClick={() => {
+                            setSettingsTabType('profile');
+                            handleScreenNavigation('profile');
+                          }}
+                          className="w-full py-2.5 px-3 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl transition-colors cursor-pointer text-center shadow-xs flex items-center justify-center gap-2"
+                        >
+                          <UserIcon className="w-3.5 h-3.5" />
+                          <span>Editar Dados do Perfil</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSettingsTabType('cv');
+                            handleScreenNavigation('profile');
+                          }}
+                          className="w-full py-2.5 px-3 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer text-center flex items-center justify-center gap-2 shadow-xs"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Visualizar / Baixar Currículo (PDF)</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSettingsTabType('settings');
+                            handleScreenNavigation('settings');
+                          }}
+                          className="w-full py-2 px-3 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition-colors cursor-pointer text-center flex items-center justify-center gap-1.5"
+                        >
+                          <Bell className="w-3.5 h-3.5" />
+                          <span>Configurar Alertas de Vagas</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CIEE Parceria / Estágio & Jovem Aprendiz */}
+                    <div 
+                      onClick={() => handleScreenNavigation('courses')}
+                      className="bg-gradient-to-br from-indigo-50/70 via-white to-sky-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 border border-indigo-200/70 dark:border-indigo-800/50 p-5 rounded-2xl flex flex-col gap-3 shadow-xs hover:border-indigo-400 transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
+                          <Award className="w-5 h-5" />
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 bg-indigo-100/60 dark:bg-indigo-900/40 px-2 py-0.5 rounded-full">
+                          Parceria Oficial
+                        </span>
+                      </div>
+                      <div>
+                        <strong className="text-sm font-bold text-slate-900 dark:text-white block group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                          Novidades de Estágio no CIEE
+                        </strong>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          Vagas de jovem menor aprendiz e estágios para estudantes de Araucária. Inscreva-se!
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 pt-1">
+                        <span>Acessar Oportunidades</span>
+                        <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                      </div>
+                    </div>
+
+                    {/* Central de Ajuda & Atendimento */}
+                    <div 
+                      onClick={() => handleScreenNavigation('messages')}
+                      className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 rounded-2xl flex flex-col gap-2.5 shadow-xs cursor-pointer hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                        <Headphones className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                        <span>Central de Atendimento ao Trabalhador</span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Dúvidas sobre envio de currículos, processos seletivos ou cursos? Fale com a equipe do Oportuniza.
+                      </p>
+                      <span className="text-xs font-semibold text-cyan-600 dark:text-cyan-400 hover:underline pt-1 inline-flex items-center gap-1">
+                        <span>Enviar Mensagem</span>
+                        <ChevronRight className="w-3 h-3" />
+                      </span>
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
             </div>
           )}
 
@@ -1623,6 +2155,7 @@ export default function App() {
                 setDetailCourse(null);
                 handleScreenNavigation('details');
               }}
+              initialSearchQuery={jobSearchFilter}
             />
           )}
 
@@ -1652,7 +2185,7 @@ export default function App() {
               user={user}
               onSetUser={setUser}
               onNavigate={handleScreenNavigation}
-              tabType="profile"
+              tabType={settingsTabType === 'cv' ? 'cv' : 'profile'}
               setTabType={setSettingsTabType}
               favorites={favorites}
               onToggleFavorite={handleToggleFavorite}

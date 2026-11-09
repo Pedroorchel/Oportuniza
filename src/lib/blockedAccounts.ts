@@ -159,7 +159,7 @@ export function saveLocalBlocked(emails: string[], ids: string[], reasons?: Reco
 export function isUserRecordBlocked(u: any): boolean {
   if (!u) return false;
   // Super admin whitelist protection
-  if (u.email && String(u.email).trim().toLowerCase() === 'pedroorchel12@gmail.com') {
+  if (u.email && String(u.email).trim().toLowerCase() === 'oportunizahw@gmail.com') {
     return false;
   }
   if (u.is_blocked === true || u.is_blocked === 'true' || u.isBlocked === true) return true;
@@ -183,7 +183,7 @@ export async function isAccountBlocked(identifier: { id?: string; email?: string
   const userId = (identifier.id || '').trim();
 
   // Root developer is never blocked
-  if (cleanEmail === 'pedroorchel12@gmail.com') {
+  if (cleanEmail === 'oportunizahw@gmail.com') {
     return false;
   }
 
@@ -274,7 +274,7 @@ export async function blockUserAccount(userId?: string, email?: string, name?: s
   const cleanReason = (reason || '').trim() || 'Violação das diretrizes da comunidade ou termos de uso';
 
   // Root developer protection
-  if (cleanEmail === 'pedroorchel12@gmail.com') {
+  if (cleanEmail === 'oportunizahw@gmail.com') {
     throw new Error('Não é permitido bloquear a conta do Administrador Principal.');
   }
 

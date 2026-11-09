@@ -92,7 +92,7 @@ export default function CoursesSection({
                 />
               </div>
               <div className="flex gap-1.5 overflow-x-auto pb-0.5 custom-scroll no-scrollbar select-none">
-                {['Todos', 'Carreira', 'Soft Skills', 'Tecnologia'].map((cat) => (
+                {['Todos', 'Carreira', 'Logística', 'Indústria', 'Segurança', 'Tecnologia', 'Administração', 'Finanças', 'Atendimento', 'Mecânica', 'Negócios', 'Artes'].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}

@@ -7,8 +7,9 @@ import {
   Mail, Phone, Smartphone, ClipboardCheck, ArrowUpRight, CheckCircle2, UserCheck,
   Menu, X, Eye, EyeOff, Shield, ShieldCheck, Tag, Sparkles, ChevronDown, UserCog,
   Lock, Unlock, Ban, AlertTriangle, UserX, Building2, Crown, Headphones, History,
-  MessageSquare, User as UserIcon
+  MessageSquare, User as UserIcon, Printer
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { motion, AnimatePresence } from 'motion/react';
 import { Job, Course, Application, User, Enrollment } from '../types';
 import { mockJobs, mockCourses, saveAdminJobs, saveAdminCourses, deleteJobPermanently } from '../data';
@@ -257,8 +258,8 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
         .select('*');
       
       if (error) {
-        console.error('Supabase error fetching users:', error);
-        setErrorMsg(`Erro Supabase: ${error.message} - ${error.details || ''}`);
+        console.error('Database error fetching users:', error);
+        setErrorMsg(`Erro de carregamento: ${error.message} - ${error.details || ''}`);
         throw error;
       }
       console.log('Fetched users raw data:', data);
@@ -274,7 +275,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
             u.isAdmin || 
             u.role === 'Administrador' || 
             u.cargo === 'Administrador' || 
-            emailLower === 'pedroorchel12@gmail.com'
+            emailLower === 'oportunizahw@gmail.com'
           );
           const isBlocked = Boolean(
             isUserRecordBlocked(u) ||
@@ -389,7 +390,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
       return;
     }
 
-    if (cleanEmail === 'pedroorchel12@gmail.com') {
+    if (cleanEmail === 'oportunizahw@gmail.com') {
       setErrorMsg('Não é permitido bloquear a conta do Administrador Principal.');
       setTimeout(() => setErrorMsg(null), 3000);
       return;
@@ -452,7 +453,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
   const handleSaveUserRole = async (targetUser: User, newRole: string) => {
     if (!targetUser) return;
     const finalRole = newRole.trim() || 'Estudante';
-    const isAdm = finalRole === 'Administrador' || targetUser.email === 'pedroorchel12@gmail.com';
+    const isAdm = finalRole === 'Administrador' || targetUser.email === 'oportunizahw@gmail.com';
     const targetId = targetUser.id || 'target-user';
     setSavingRoleUserId(targetId);
 
@@ -1143,6 +1144,54 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
     return `https://api.whatsapp.com/send?phone=${p}&text=${encodeURIComponent(textMsg)}`;
   };
 
+  // PDF Export for Audit Logs
+  const handleExportAuditPDF = () => {
+    try {
+      const doc = new jsPDF();
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("Prefeitura Municipal de Araucaria", 14, 18);
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+      doc.text("Relatorio Oficial de Auditoria e Governanca (Quem Autorizou)", 14, 25);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 32);
+      doc.line(14, 36, 196, 36);
+
+      let y = 44;
+      auditLogs.slice(0, 30).forEach((log, index) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        const dateStr = formatBrasiliaTime(log.timestamp);
+        doc.text(`${index + 1}. [${log.action}] - ${dateStr}`, 14, y);
+        y += 5;
+        doc.setFont("helvetica", "normal");
+        doc.text(`Autorizado por: ${log.actor_name} (${log.actor_email || 'N/A'}) - ${log.actor_role}`, 14, y);
+        y += 5;
+        doc.text(`Alvo: ${log.target_name || 'Geral'} | Status: ${log.status}`, 14, y);
+        y += 5;
+        if (log.details) {
+          const splitText = doc.splitTextToSize(`Detalhes: ${log.details}`, 180);
+          doc.text(splitText, 14, y);
+          y += splitText.length * 5 + 4;
+        } else {
+          y += 4;
+        }
+      });
+
+      doc.save(`Auditoria_Oportuniza_Araucaria_${new Date().toISOString().split('T')[0]}.pdf`);
+      setSuccessMsg('Relatório de auditoria exportado em PDF com sucesso!');
+      setTimeout(() => setSuccessMsg(null), 3500);
+    } catch (err) {
+      console.error('PDF export error:', err);
+      setErrorMsg('Erro ao gerar relatório de auditoria em PDF.');
+      setTimeout(() => setErrorMsg(null), 3500);
+    }
+  };
+
   // Categorization collections
   const jobCategories = ['Todos', 'Saúde', 'Administração', 'Serviços Gerais', 'Alimentação', 'Comércio', 'Logística', 'Indústria', 'Estágios', 'Produtividade'];
   const courseCategories = ['Todos', 'Produtividade', 'Sistemas', 'Atendimento', 'Comércio', 'Saúde'];
@@ -1419,7 +1468,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
               </h4>
             </div>
             <p className="text-[10px] text-slate-400 leading-normal font-medium">
-              Acompanhamento de candidaturas municipais em tempo real integradas com o Supabase.
+              Acompanhamento de candidaturas municipais em tempo real integradas com o banco de dados.
             </p>
           </div>
         </aside>
@@ -1683,7 +1732,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
                     <span className="font-extrabold text-slate-300">Sincronização de Dados</span>
                   </div>
                   <p className="text-[10px] text-slate-500 leading-normal">
-                    Conectado ao Supabase municipal.
+                    Conectado ao servidor municipal.
                   </p>
                 </div>
               </motion.aside>
@@ -1905,7 +1954,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
                         Gestão Descentralizada
                       </h3>
                       <p className="text-xs text-slate-300 leading-relaxed mt-2">
-                        Como administrador, você pode interagir com os candidatos do portal enviando mensagens diretas, alterando o status de suas candidaturas de análise no Supabase, e mantendo o feed de incentivos e capacitações municipais sempre preenchido.
+                        Como administrador, você pode interagir com os candidatos do portal enviando mensagens diretas, alterando o status de suas candidaturas de análise no sistema, e mantendo o feed de incentivos e capacitações municipais sempre preenchido.
                       </p>
                     </div>
                   </div>
@@ -3011,7 +3060,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
                     </div>
                     <div className="mt-1">
                       <span className="text-xl font-black text-amber-300 block">
-                        {userList.filter(u => String(u.email || '').toLowerCase() === 'pedroorchel12@gmail.com' || String(u.role || u.cargo || '').toLowerCase().includes('criador') || (u.isAdmin && !String(u.role || u.cargo || '').toLowerCase().includes('atendimento'))).length}
+                        {userList.filter(u => String(u.email || '').toLowerCase() === 'oportunizahw@gmail.com' || String(u.role || u.cargo || '').toLowerCase().includes('criador') || (u.isAdmin && !String(u.role || u.cargo || '').toLowerCase().includes('atendimento'))).length}
                       </span>
                       <span className="text-[10px] font-bold text-slate-300 block truncate">Admin Criador</span>
                     </div>
@@ -3248,7 +3297,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
 
                             const roleText = String(u.role || u.cargo || '').toLowerCase();
                             const emailText = String(u.email || '').toLowerCase();
-                            const isAppCreator = emailText === 'pedroorchel12@gmail.com' || roleText.includes('criador') || (u.isAdmin && !roleText.includes('atendimento'));
+                            const isAppCreator = emailText === 'oportunizahw@gmail.com' || roleText.includes('criador') || (u.isAdmin && !roleText.includes('atendimento'));
                             const isSupport = roleText.includes('atendimento') || roleText.includes('suporte') || roleText.includes('moderador');
                             const isCompany = !isAppCreator && (u.accountType === 'company' || roleText === 'empresa' || Boolean(u.cnpj && !roleText.includes('recrutador')));
                             const isCompanyUser = roleText.includes('recrutador') || roleText.includes('rh') || roleText.includes('usuário da empresa') || roleText.includes('usuario da empresa');
@@ -3473,6 +3522,14 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportAuditPDF}
+                    className="px-4 py-2.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Gerar Relatório PDF</span>
+                  </button>
+
                   <button
                     onClick={loadAuditLogs}
                     disabled={loadingAudit}
@@ -4836,7 +4893,7 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
                   Remoção total e imediata do sistema
                 </p>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  A vaga será apagada da base de dados do Supabase e do mural público de Araucária. Esta ação será registrada no histórico de auditoria (<span className="text-slate-350">"Quem Autorizou"</span>) com sua assinatura administrativa.
+                  A vaga será apagada da base de dados e do mural público de Araucária. Esta ação será registrada no histórico de auditoria (<span className="text-slate-350">"Quem Autorizou"</span>) com sua assinatura administrativa.
                 </p>
               </div>
 

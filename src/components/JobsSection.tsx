@@ -11,6 +11,7 @@ interface JobsSectionProps {
   onToggleFavorite: (id: string) => void;
   onBack: () => void;
   onNavigateToDetailsJob: (job: Job) => void;
+  initialSearchQuery?: string;
 }
 
 export default function JobsSection({
@@ -20,12 +21,19 @@ export default function JobsSection({
   onToggleFavorite,
   onBack,
   onNavigateToDetailsJob,
+  initialSearchQuery = '',
 }: JobsSectionProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
   const [selectedType, setSelectedType] = useState<string>('Todos');
   const [selectedNeighborhood, setSelectedNeighborhood] = useState<string>('Todos');
   const [activeTab, setActiveTab] = useState<'vagas' | 'favoritos' | 'candidaturas'>('vagas');
   const [jobsList, setJobsList] = useState<Job[]>(() => [...mockJobs]);
+
+  useEffect(() => {
+    if (initialSearchQuery !== undefined) {
+      setSearchQuery(initialSearchQuery);
+    }
+  }, [initialSearchQuery]);
 
   const ARAUCARIA_NEIGHBORHOODS = [
     'Todos',

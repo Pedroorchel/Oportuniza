@@ -65,6 +65,7 @@ export default function SettingsScreen({
   const [generalNotifications, setGeneralNotifications] = useState<boolean>(user?.notificationsEnabled ?? true);
   const [marketingEmails, setMarketingEmails] = useState<boolean>(user?.marketingEmailsEnabled ?? false);
   const [courseAlerts, setCourseAlerts] = useState<boolean>(true);
+  const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(user?.is2FAEnabled ?? true);
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission | 'unsupported'>('default');
 
   // Password modal / inline states
@@ -93,8 +94,39 @@ export default function SettingsScreen({
       setTiJobsPush(user.tiJobsPushEnabled ?? false);
       setGeneralNotifications(user.notificationsEnabled ?? true);
       setMarketingEmails(user.marketingEmailsEnabled ?? false);
+      setIs2FAEnabled(user.is2FAEnabled ?? true);
     }
   }, [user]);
+
+  const handleToggle2FA = async (enabled: boolean) => {
+    setIs2FAEnabled(enabled);
+    if (user) {
+      const updatedUser: User = {
+        ...user,
+        is2FAEnabled: enabled
+      };
+      onSetUser(updatedUser);
+
+      try {
+        if (user.email) {
+          localStorage.setItem(`oportuniza-2fa-${user.email}`, JSON.stringify(enabled));
+        }
+        if (user.id) {
+          await supabase
+            .from('users')
+            .update({ is_2fa_enabled: enabled })
+            .eq('id', user.id);
+        }
+      } catch (e) {
+        console.warn('Sync 2FA warning:', e);
+      }
+    }
+    if (enabled) {
+      toast.success('🔒 Verificação em Duas Etapas (2FA) ativada!');
+    } else {
+      toast.info('Verificação em Duas Etapas (2FA) desativada.');
+    }
+  };
 
   // Push Notifications Toggle Handler for TI Jobs
   const handleToggleTiJobsPush = async (enabled: boolean) => {
@@ -660,16 +692,48 @@ export default function SettingsScreen({
           </div>
 
           {!showPasswordSection ? (
-            <button
-              onClick={() => setShowPasswordSection(true)}
-              className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-gray-200 font-semibold transition-colors cursor-pointer group border border-gray-100 dark:border-slate-800/80"
-            >
-              <div className="flex items-center gap-3">
-                <Lock className="w-4 h-4 text-indigo-500" />
-                <span className="text-sm">Alterar Senha de Acesso</span>
+            <div className="flex flex-col gap-2.5">
+              {/* Toggle 2FA */}
+              <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-slate-800/60 flex items-center justify-between gap-3 border border-gray-100 dark:border-slate-800/80">
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-800 dark:text-gray-200">
+                      Verificação de 2 Etapas (2FA)
+                    </span>
+                    <span className="px-1.5 py-0.5 bg-indigo-500/15 text-indigo-500 text-[10px] font-black rounded-md uppercase">
+                      Recomendado
+                    </span>
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Aumente a segurança exigindo um código enviado ao seu e-mail no login
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggle2FA(!is2FAEnabled)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer ${
+                    is2FAEnabled ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform ${
+                      is2FAEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
-              <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
-            </button>
+
+              <button
+                onClick={() => setShowPasswordSection(true)}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-800 dark:text-gray-200 font-semibold transition-colors cursor-pointer group border border-gray-100 dark:border-slate-800/80"
+              >
+                <div className="flex items-center gap-3">
+                  <Lock className="w-4 h-4 text-indigo-500" />
+                  <span className="text-sm">Alterar Senha de Acesso</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
           ) : (
             <form onSubmit={handleUpdatePassword} className="flex flex-col gap-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 transition-all">
               <div className="flex items-center justify-between pb-1">

@@ -472,6 +472,29 @@ export default function DesktopLanding({ onNavigate }: DesktopLandingProps) {
             </div>
           </div>
 
+          {/* Elegant Live Impact Metrics Strip */}
+          <div className="w-full max-w-5xl grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
+            <div className="p-5 rounded-3xl bg-white dark:bg-[#131E32] border border-slate-200/90 dark:border-slate-700 shadow-xs flex flex-col items-center text-center gap-1">
+              <span className="text-2xl sm:text-3xl font-black text-primary dark:text-[#52B4D8] tracking-tight">+1.240</span>
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Jovens Empregados</span>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-[#131E32] border border-slate-200/90 dark:border-slate-700 shadow-xs flex flex-col items-center text-center gap-1">
+              <span className="text-2xl sm:text-3xl font-black text-teal-600 dark:text-teal-400 tracking-tight">+860</span>
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Certificados Emitidos</span>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-[#131E32] border border-slate-200/90 dark:border-slate-700 shadow-xs flex flex-col items-center text-center gap-1">
+              <span className="text-2xl sm:text-3xl font-black text-amber-500 tracking-tight">4.9 / 5.0</span>
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Avaliação da Comunidade</span>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-[#131E32] border border-slate-200/90 dark:border-slate-700 shadow-xs flex flex-col items-center text-center gap-1">
+              <span className="text-2xl sm:text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight">100%</span>
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Gratuito para Sempre</span>
+            </div>
+          </div>
+
         </div>
       </section>
 

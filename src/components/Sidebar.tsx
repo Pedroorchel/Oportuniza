@@ -1,5 +1,5 @@
-import { Home, MessageSquare, Map, Settings, X, LogOut, Moon, Sun, Headphones } from 'lucide-react';
-import { ScreenId, User } from '../types';
+import { Home, MessageSquare, Map, Settings, X, LogOut, Moon, Sun, Headphones, Briefcase, GraduationCap, FileText, User, Sparkles } from 'lucide-react';
+import { ScreenId, User as UserType } from '../types';
 import { useTheme } from '../lib/theme';
 import { resolveUserHierarchyTier } from '../lib/hierarchyRoles';
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
@@ -10,8 +10,9 @@ interface SidebarProps {
   currentScreen: ScreenId;
   onNavigate: (screen: ScreenId) => void;
   unreadCount: number;
-  user?: User | null;
+  user?: UserType | null;
   onSignOut: () => void;
+  applicationsCount?: number;
 }
 
 export default function Sidebar({
@@ -22,6 +23,7 @@ export default function Sidebar({
   unreadCount,
   user,
   onSignOut,
+  applicationsCount = 0,
 }: SidebarProps) {
   const [theme, toggleTheme] = useTheme();
 
@@ -34,7 +36,7 @@ export default function Sidebar({
       />
 
       {/* Drawer */}
-      <div className={`sidebar ${isOpen ? 'active' : ''}`}>
+      <div className={`sidebar ${isOpen ? 'active' : ''} overflow-y-auto custom-scroll`}>
         <button
           className="absolute top-6 right-6 p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
           onClick={onClose}
@@ -44,53 +46,102 @@ export default function Sidebar({
         </button>
 
         <div className="sidebar-header mt-4">
-          <div className="w-[75px] h-[75px] rounded-2xl bg-white flex items-center justify-center overflow-hidden shadow-sm shrink-0 border border-gray-100 dark:border-slate-800">
+          <div className="w-[60px] h-[60px] rounded-2xl bg-white flex items-center justify-center overflow-hidden shadow-sm shrink-0 border border-gray-100 dark:border-slate-800">
             <img src={logo} alt="Oportuniza" className="w-full h-full object-cover object-center block" />
           </div>
           <div>
-            <span className="font-bold tracking-tight text-gray-900 dark:text-white text-lg block">
+            <span className="font-bold tracking-tight text-gray-900 dark:text-white text-base block">
               Oportuniza
             </span>
-            <p className="text-[10px] text-gray-400 dark:text-gray-400 font-medium">Carreira & Vagas</p>
+            <p className="text-[10px] text-gray-400 dark:text-gray-400 font-medium">Araucária / PR</p>
           </div>
         </div>
 
-        <nav className="sidebar-nav mt-6 flex flex-col gap-1">
+        <nav className="sidebar-nav mt-4 flex flex-col gap-1">
+          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Navegação
+          </div>
+
           <button
             onClick={() => {
               onNavigate('home');
               onClose();
             }}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium text-sm text-left transition-all ${
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
               currentScreen === 'home'
                 ? 'bg-primary/10 text-primary font-bold'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
             }`}
           >
             <Home className="w-4 h-4" />
-            <span>Home</span>
+            <span>Início</span>
           </button>
 
           <button
             onClick={() => {
-              onNavigate('messages');
+              onNavigate('jobs');
               onClose();
             }}
-            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-medium text-sm text-left transition-all ${
-              currentScreen === 'messages'
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
+              currentScreen === 'jobs'
                 ? 'bg-primary/10 text-primary font-bold'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
             }`}
           >
-            <div className="flex items-center gap-4">
-              <MessageSquare className="w-4 h-4" />
-              <span>Mensagens</span>
+            <Briefcase className="w-4 h-4" />
+            <span>Vagas em Araucária</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onNavigate('courses');
+              onClose();
+            }}
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
+              currentScreen === 'courses'
+                ? 'bg-primary/10 text-primary font-bold'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <GraduationCap className="w-4 h-4" />
+            <span>Cursos Gratuitos</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onNavigate('applications');
+              onClose();
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
+              currentScreen === 'applications'
+                ? 'bg-primary/10 text-primary font-bold'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <div className="flex items-center gap-3.5">
+              <FileText className="w-4 h-4" />
+              <span>Minhas Candidaturas</span>
             </div>
-            {unreadCount > 0 && (
-              <span className="bg-red-500 text-white font-bold text-[9px] rounded-full px-2 py-0.5 min-w-5 text-center">
-                {unreadCount}
+            {applicationsCount > 0 && (
+              <span className="bg-sky-500 text-white font-bold text-[9px] rounded-full px-2 py-0.5">
+                {applicationsCount}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => {
+              onNavigate('mentor');
+              onClose();
+            }}
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
+              currentScreen === 'mentor'
+                ? 'bg-primary/10 text-primary font-bold'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>Simulador de Entrevista</span>
           </button>
 
           <button
@@ -98,14 +149,57 @@ export default function Sidebar({
               onNavigate('map');
               onClose();
             }}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium text-sm text-left transition-all ${
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
               currentScreen === 'map'
                 ? 'bg-primary/10 text-primary font-bold'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
             }`}
           >
             <Map className="w-4 h-4" />
-            <span>Mapa</span>
+            <span>Mapa de Empresas</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onNavigate('messages');
+              onClose();
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
+              currentScreen === 'messages'
+                ? 'bg-primary/10 text-primary font-bold'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <div className="flex items-center gap-3.5">
+              <MessageSquare className="w-4 h-4" />
+              <span>Mensagens & Avisos</span>
+            </div>
+            {unreadCount > 0 && (
+              <span className="bg-rose-500 text-white font-bold text-[9px] rounded-full px-2 py-0.5 min-w-5 text-center">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+
+          <div className="my-2 border-t border-slate-100 dark:border-slate-800" />
+
+          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Minha Conta
+          </div>
+
+          <button
+            onClick={() => {
+              onNavigate('profile');
+              onClose();
+            }}
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
+              currentScreen === 'profile'
+                ? 'bg-primary/10 text-primary font-bold'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            <span>Meu Perfil & Currículo</span>
           </button>
 
           <button
@@ -113,7 +207,7 @@ export default function Sidebar({
               onNavigate('settings');
               onClose();
             }}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium text-sm text-left transition-all ${
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-xs text-left transition-all cursor-pointer ${
               currentScreen === 'settings'
                 ? 'bg-primary/10 text-primary font-bold'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800/60'

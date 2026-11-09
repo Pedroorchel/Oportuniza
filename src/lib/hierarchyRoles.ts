@@ -146,8 +146,7 @@ export function resolveUserHierarchyTier(user: any): HierarchyTier {
 
   // Tier 1: Admin Criador da Aplicação
   if (
-    emailLower === 'pedroorchel12@gmail.com' ||
-    emailLower === 'orchel@gmail.com' ||
+    emailLower === 'oportunizahw@gmail.com' ||
     roleLower.includes('criador') ||
     roleLower.includes('super admin') ||
     roleLower === 'admin criador da aplicação' ||

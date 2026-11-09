@@ -17,9 +17,9 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 1. TABELA DE USUÁRIOS / PERFIS (public.users)
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS public.users (
-  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT,
-  email TEXT,
+  email TEXT UNIQUE,
   avatar_url TEXT,
   bio TEXT,
   education TEXT,
@@ -34,9 +34,18 @@ CREATE TABLE IF NOT EXISTS public.users (
   updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Garantir coluna is_admin caso a tabela já existisse
+-- Garantir colunas essenciais caso a tabela já existisse
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password TEXT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_2fa_enabled BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL;
+
+-- REMOVER RESTRIÇÃO DE CHAVE ESTRANGEIRA (FK) - Necessário para shadow accounts
+-- Tentamos remover pelo nome padrão do Supabase
+ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_id_fkey;
+
+-- Garantir índice único para e-mail (necessário para o upsert de sincronização)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON public.users (email);
 
 -- Ativa RLS estrito
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -53,21 +62,28 @@ DROP POLICY IF EXISTS "users_insert_policy" ON public.users;
 DROP POLICY IF EXISTS "users_update_policy" ON public.users;
 
 -- Políticas Seguras para public.users
+DROP POLICY IF EXISTS "users_select_policy" ON public.users;
 CREATE POLICY "users_select_policy" 
   ON public.users FOR SELECT 
   TO authenticated, anon
   USING (TRUE);
 
+DROP POLICY IF EXISTS "users_update_policy" ON public.users;
 CREATE POLICY "users_update_policy" 
   ON public.users FOR UPDATE 
-  TO authenticated 
-  USING (auth.uid() = id OR auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com') 
-  WITH CHECK (auth.uid() = id OR auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com');
+  TO authenticated, anon
+  USING (TRUE)
+  WITH CHECK (TRUE);
 
+DROP POLICY IF EXISTS "users_insert_policy" ON public.users;
 CREATE POLICY "users_insert_policy" 
   ON public.users FOR INSERT 
-  TO authenticated 
-  WITH CHECK (auth.uid() = id OR auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com');
+  TO authenticated, anon
+  WITH CHECK (TRUE);
+
+-- Política de fallback para garantir acesso total se o usuário estiver tentando forçar via SQL
+DROP POLICY IF EXISTS "Permitir acesso a todos os usuários" ON public.users;
+CREATE POLICY "Permitir acesso a todos os usuários" ON public.users FOR ALL USING (TRUE);
 
 -- Trigger de criação automática com SECURITY DEFINER (Roda com privilégios de sistema)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -80,7 +96,7 @@ BEGIN
     COALESCE(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
     COALESCE(new.raw_user_meta_data->>'avatar_url', ''),
     COALESCE(new.raw_user_meta_data->>'phone', ''),
-    (new.email = 'pedroorchel12@gmail.com')
+    (new.email = 'oportunizahw@gmail.com')
   )
   ON CONFLICT (id) DO UPDATE
   SET
@@ -88,7 +104,7 @@ BEGIN
     name = COALESCE(EXCLUDED.name, public.users.name),
     avatar_url = COALESCE(EXCLUDED.avatar_url, public.users.avatar_url),
     phone = COALESCE(EXCLUDED.phone, public.users.phone),
-    is_admin = (EXCLUDED.email = 'pedroorchel12@gmail.com' OR public.users.is_admin),
+    is_admin = (EXCLUDED.email = 'oportunizahw@gmail.com' OR public.users.is_admin),
     updated_at = timezone('utc'::text, now());
   RETURN new;
 END;
@@ -136,11 +152,11 @@ CREATE POLICY "jobs_admin_all"
   ON public.jobs FOR ALL 
   TO authenticated 
   USING (
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR 
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR 
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   )
   WITH CHECK (
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR 
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR 
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -182,11 +198,11 @@ CREATE POLICY "courses_admin_all"
   ON public.courses FOR ALL 
   TO authenticated 
   USING (
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR 
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR 
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   )
   WITH CHECK (
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR 
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR 
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -245,7 +261,7 @@ CREATE POLICY "apps_select_owner_or_admin"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -255,7 +271,7 @@ CREATE POLICY "apps_insert_owner"
   TO authenticated 
   WITH CHECK (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     auth.uid() IS NOT NULL
   );
 
@@ -265,12 +281,12 @@ CREATE POLICY "apps_update_owner_or_admin"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   )
   WITH CHECK (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -280,7 +296,7 @@ CREATE POLICY "apps_delete_owner_or_admin"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -334,7 +350,7 @@ CREATE POLICY "enrollments_select_policy"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -343,7 +359,7 @@ CREATE POLICY "enrollments_insert_policy"
   TO authenticated 
   WITH CHECK (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     auth.uid() IS NOT NULL
   );
 
@@ -352,12 +368,12 @@ CREATE POLICY "enrollments_update_policy"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   ) 
   WITH CHECK (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -366,7 +382,7 @@ CREATE POLICY "enrollments_delete_policy"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 
@@ -397,7 +413,7 @@ CREATE POLICY "progress_select_policy"
   TO authenticated 
   USING (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com'
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com'
   );
 
 CREATE POLICY "progress_insert_policy" 
@@ -405,7 +421,7 @@ CREATE POLICY "progress_insert_policy"
   TO authenticated 
   WITH CHECK (
     auth.uid()::text = user_id::text OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com'
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com'
   );
 
 
@@ -441,7 +457,7 @@ CREATE POLICY "orders_select_policy"
   TO authenticated 
   USING (
     auth.jwt() ->> 'email' = customer_email OR 
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com'
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com'
   );
 
 -- Inserção: liberada para checkout de novos pedidos
@@ -453,8 +469,8 @@ CREATE POLICY "orders_insert_checkout"
 CREATE POLICY "orders_admin_modify" 
   ON public.orders FOR ALL 
   TO authenticated 
-  USING (auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com')
-  WITH CHECK (auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com');
+  USING (auth.jwt() ->> 'email' = 'oportunizahw@gmail.com')
+  WITH CHECK (auth.jwt() ->> 'email' = 'oportunizahw@gmail.com');
 
 
 -- =====================================================================
@@ -492,11 +508,11 @@ CREATE POLICY "companies_all_admin"
   ON public.companies FOR ALL 
   TO authenticated 
   USING (
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR 
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR 
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   )
   WITH CHECK (
-    auth.jwt() ->> 'email' = 'pedroorchel12@gmail.com' OR 
+    auth.jwt() ->> 'email' = 'oportunizahw@gmail.com' OR 
     (auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean = true
   );
 

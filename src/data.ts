@@ -690,11 +690,289 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     dateString: '2 dias atrás',
     color: 'border-l-indigo-500',
     active: true
+  },
+  {
+    title: 'Torneiro Mecânico / Operador CNC',
+    company: 'Indústria Metalúrgica Araucária',
+    category: 'Mecânica',
+    description: 'Usinagem de peças metálicas de alta precisão em torno mecânico convencional e torno CNC. Leitura de desenho técnico e aferição de medidas com paquímetro e micrômetro.',
+    requirements: [
+      'Ensino médio completo + Curso de Torneiro Mecânico ou CNC',
+      'Experiência mínima de 1 ano em ambiente industrial',
+      'Leitura e interpretação de desenho técnico',
+      'Residir em Araucária ou região de fácil acesso'
+    ],
+    salary: 'R$ 3.200,00 + Insalubridade + VR',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Costeira',
+    lat: -25.5680,
+    lng: -49.4010,
+    logo: '/assets/images/logo_metalika_1793965852486.jpg',
+    dateString: 'Hoje',
+    color: 'border-l-blue-600',
+    active: true
+  },
+  {
+    title: 'Almoxarife Sênior',
+    company: 'Berneck Painéis e Madeira',
+    category: 'Logística',
+    description: 'Gestão física e sistêmica do almoxarifado fabril. Controle de estoque via ERP, recebimento de matérias-primas pesadas, inventários periódicos e liderança de equipe.',
+    requirements: [
+      'Ensino médio completo (Curso Técnico em Logística é diferencial)',
+      'Domínio de sistemas ERP de almoxarifado (SAP, Totvs ou similar)',
+      'Curso de Operador de Empilhadeira ativo',
+      'Disponibilidade para trabalhar em turnos'
+    ],
+    salary: 'R$ 2.850,00 + Refeitório no Local + Fretado',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Thomaz Coelho',
+    lat: -25.5480,
+    lng: -49.4120,
+    logo: '/assets/images/logo_berneck_1793965852701.jpg',
+    dateString: 'Ontem',
+    color: 'border-l-emerald-600',
+    active: true
+  },
+  {
+    title: 'Assistente de Recursos Humanos (DP & Admissão)',
+    company: 'Grupo CSN Araucária',
+    category: 'Recursos Humanos',
+    description: 'Atuar nas rotinas de departamento pessoal: recolhimento de documentos para registro, agendamento de exames admissionais, controle de ponto eletrônico e atendimento aos colaboradores.',
+    requirements: [
+      'Cursando ou concluído RH, Administração ou Ciências Contábeis',
+      'Noções das rotinas de folha de pagamento e eSocial',
+      'Boa comunicação interpessoal e organização de arquivos',
+      'Conhecimento intermediário em Excel'
+    ],
+    salary: 'R$ 2.450,00 + Plano de Saúde + VT',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Centro',
+    lat: -25.5920,
+    lng: -49.4160,
+    logo: '/assets/images/logo_csn_araucaria_1793965855603.jpg',
+    dateString: 'Hoje',
+    color: 'border-l-teal-600',
+    active: true
+  },
+  {
+    title: 'Eletricista Industrial de Manutenção',
+    company: 'Refinaria de Araucária (REPAR)',
+    category: 'Manutenção',
+    description: 'Manutenção preventiva e corretiva em quadros de distribuição, motores elétricos trifásicos, inversores de frequência e subestações industriais.',
+    requirements: [
+      'Curso Técnico em Eletrotécnica ou Eletromecânica',
+      'NR-10 e NR-35 válidos e atualizados',
+      'Experiência prévia em plantas industriais ou petroquímicas',
+      'Disponibilidade para escala 12x36 ou turnos'
+    ],
+    salary: 'R$ 3.800,00 + 30% Periculosidade + Benefícios',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Polo Petrobras',
+    lat: -25.5630,
+    lng: -49.3840,
+    logo: 'https://ui-avatars.com/api/?name=RP&background=0284c7&color=fff&size=128&bold=true',
+    dateString: 'Hoje',
+    color: 'border-l-sky-600',
+    active: true
+  },
+  {
+    title: 'Operador de Caixa e Repositor (Primeiro Emprego)',
+    company: 'Atacadão Araucária',
+    category: 'Varejo',
+    description: 'Atendimento no registro de mercadorias no caixa, organização das gôndolas e suporte no atendimento ao cliente. Excelente oportunidade para quem busca o primeiro emprego registrado.',
+    requirements: [
+      'Ensino médio cursando ou completo',
+      'Boa vontade, simpatia e pontualidade',
+      'Não exige experiência prévia (treinamento oferecido pela empresa)',
+      'Residir em Araucária'
+    ],
+    salary: 'R$ 1.620,00 + Quebra de Caixa + Vale Transporte',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Campina da Barra',
+    lat: -25.5840,
+    lng: -49.4080,
+    logo: 'https://ui-avatars.com/api/?name=AT&background=f59e0b&color=fff&size=128&bold=true',
+    dateString: 'Ontem',
+    color: 'border-l-amber-500',
+    active: true
+  },
+  {
+    title: 'Estágio em Engenharia Mecânica / Processos',
+    company: 'Indústria Metalúrgica Araucária',
+    category: 'Engenharia',
+    description: 'Suporte no mapeamento de tempos de produção, auxílio na elaboração de instruções de trabalho (IT), acompanhamento de testes de qualidade de peças e relatórios no Excel.',
+    requirements: [
+      'Cursando Engenharia Mecânica, Produção ou Automação (a partir do 3º período)',
+      'Conhecimento básico em AutoCAD ou SolidWorks',
+      'Excel intermediário (tabelas e gráficos)',
+      'Perfil analítico e proativo'
+    ],
+    salary: 'R$ 1.450,00 + Transporte Fretado + Refeição',
+    type: 'Estágio',
+    isRemote: false,
+    location: 'Araucária - Fazenda Velha',
+    lat: -25.5760,
+    lng: -49.4230,
+    logo: '/assets/images/logo_metalika_1793965852486.jpg',
+    dateString: 'Hoje',
+    color: 'border-l-indigo-600',
+    active: true
+  },
+  {
+    title: 'Motorista Entregador Categoria C / D',
+    company: 'Distribuidora Araucária de Bebidas',
+    category: 'Transporte',
+    description: 'Condução de caminhão baú para entregas no comércio local de Araucária e região metropolitana. Conferência de notas fiscais e mercadorias junto aos clientes.',
+    requirements: [
+      'Ensino fundamental completo',
+      'CNH Categoria C ou D com EAR (Exerce Atividade Remunerada)',
+      'Experiência em entregas urbanas',
+      'Disponibilidade para início imediato'
+    ],
+    salary: 'R$ 2.600,00 + Diária de Alimentação + VT',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Iguaçu',
+    lat: -25.5890,
+    lng: -49.4180,
+    logo: 'https://ui-avatars.com/api/?name=DA&background=16a34a&color=fff&size=128&bold=true',
+    dateString: '2 dias atrás',
+    color: 'border-l-green-600',
+    active: true
+  },
+  {
+    title: 'Auxiliar de Limpeza e Organização Hospitalar',
+    company: 'Unidade Saúde Araucária',
+    category: 'Serviços Gerais',
+    description: 'Higienização e desinfecção de consultórios, recepção e áreas comuns de saúde. Reposição de insumos e cumprimento rigoroso dos protocolos de biossegurança.',
+    requirements: [
+      'Ensino fundamental completo',
+      'Atenção às normas de higiene e biossegurança',
+      'Pontualidade e responsabilidade',
+      'Vaga também aberta para primeiro emprego'
+    ],
+    salary: 'R$ 1.580,00 + Insalubridade + VT',
+    type: 'CLT',
+    isRemote: false,
+    location: 'Araucária - Tindiquera',
+    lat: -25.5980,
+    lng: -49.4110,
+    logo: 'https://ui-avatars.com/api/?name=US&background=0d9488&color=fff&size=128&bold=true',
+    dateString: '3 dias atrás',
+    color: 'border-l-teal-500',
+    active: true
   }
 ];
 
 
 const DEFAULT_COURSES: Course[] = [
+  {
+    id: 'course-27',
+    title: 'Curso de Oratória, Comunicação & Entrevistas de Emprego',
+    logo: 'Mic',
+    coverImage: 'https://img.youtube.com/vi/5-20H5l3K-g/hqdefault.jpg',
+    desc: 'Desenvolva uma comunicação confiante, clara e persuasiva. Aprenda a vencer a timidez ao falar em público, dominar a linguagem corporal e responder com segurança às perguntas mais desafiadoras dos recrutadores de RH.',
+    category: 'Carreira',
+    duration: '5 aulas (42m)',
+    instructor: 'Especialista em Desenvolvimento Profissional',
+    rating: 5.0,
+    level: 'Iniciante ao Avançado',
+    lessons: [
+      { title: 'Aula 1: Como Vencer o Medo de Falar em Público e se Apresentar', duration: '9:40', done: false, youtubeId: '5-20H5l3K-g' },
+      { title: 'Aula 2: Linguagem Corporal e Postura de Confiança', duration: '8:15', done: false, youtubeId: 'L2pQ9W7bM3k' },
+      { title: 'Aula 3: Como Responder Perguntas Difíceis em Entrevistas de RH', duration: '10:50', done: false, youtubeId: 'R8kL9W2Q5aM' },
+      { title: 'Aula 4: Técnica Pitch Pessoal: Apresente seu Currículo em 2 Minutos', duration: '7:30', done: false, youtubeId: 'P7kL9W2Q8bM' },
+      { title: 'Aula 5: Comunicação Não-Violenta e Trabalho em Equipe', duration: '6:10', done: false, youtubeId: 'C9kL2P5W8aM' }
+    ],
+    completed: false
+  },
+  {
+    id: 'course-26',
+    title: 'Curso de Informática Básica & Pacote Office para Primeiro Emprego',
+    logo: 'Monitor',
+    coverImage: 'https://img.youtube.com/vi/S9uPNppGsGo/hqdefault.jpg',
+    desc: 'Capacitação prática essencial em tecnologia para quem quer ingressar no mercado de trabalho. Aprenda do zero a usar o Windows, criar e formatar documentos profissionais no Word, montar planilhas simples no Excel e organizar arquivos digitais.',
+    category: 'Tecnologia',
+    duration: '6 aulas (1h 10m)',
+    instructor: 'Fundação Bradesco / Tecnologia',
+    rating: 4.9,
+    level: 'Iniciante',
+    lessons: [
+      { title: 'Aula 1: Conhecendo o Computador, Sistema Windows e Atalhos Úteis', duration: '12:30', done: false, youtubeId: 'S9uPNppGsGo' },
+      { title: 'Aula 2: Criando e Formatando Documentos no Microsoft Word', duration: '14:20', done: false, youtubeId: 'W9uPNppGsGo' },
+      { title: 'Aula 3: Primeiros Passos no Excel: Tabelas e Somas Automáticas', duration: '15:10', done: false, youtubeId: 'I2taMQ3j6qo' },
+      { title: 'Aula 4: Apresentações de Impacto no PowerPoint', duration: '10:45', done: false, youtubeId: 'P9uPNppGsGo' },
+      { title: 'Aula 5: Organização de E-mails Corporativos e Google Drive', duration: '9:15', done: false, youtubeId: 'G9uPNppGsGo' },
+      { title: 'Aula 6: Segurança Digital e Navegação Consciente no Trabalho', duration: '8:00', done: false, youtubeId: 'N9uPNppGsGo' }
+    ],
+    completed: false
+  },
+  {
+    id: 'course-25',
+    title: 'Curso de Segurança do Trabalho (NR-35, CIPA & Primeiros Socorros)',
+    logo: 'ShieldCheck',
+    coverImage: 'https://img.youtube.com/vi/b7y8Kz4z81k/hqdefault.jpg',
+    desc: 'Entenda os princípios fundamentais da prevenção de acidentes na indústria. Aprenda sobre o uso correto de EPIs e EPCs, atuação da CIPA, noções de trabalho em altura conforme a NR-35 e procedimentos essenciais de primeiros socorros.',
+    category: 'Segurança',
+    duration: '5 aulas (48m)',
+    instructor: 'Técnico em Segurança do Trabalho - Araucária',
+    rating: 4.9,
+    level: 'Iniciante',
+    lessons: [
+      { title: 'Aula 1: Introdução à Segurança do Trabalho e Atuação da CIPA', duration: '10:12', done: false, youtubeId: 'b7y8Kz4z81k' },
+      { title: 'Aula 2: Uso Correto dos EPIs e EPCs na Linha de Produção', duration: '9:05', done: false, youtubeId: 'X9kL2P7W8bM' },
+      { title: 'Aula 3: Trabalho em Altura (NR-35): Ancoragem e Cinto de Segurança', duration: '11:45', done: false, youtubeId: 'L8kW3Q9P2aM' },
+      { title: 'Aula 4: Noções Práticas de Primeiros Socorros no Ambiente Fabril', duration: '10:30', done: false, youtubeId: 'K7mW2Q9L5bM' },
+      { title: 'Aula 5: Prevenção de Incêndios e Rotas de Fuga', duration: '7:00', done: false, youtubeId: 'R5kL9W2Q8aM' }
+    ],
+    completed: false
+  },
+  {
+    id: 'course-24',
+    title: 'Curso de Soldagem Industrial (MIG/MAG & Eletrodo Revestido)',
+    logo: 'Zap',
+    coverImage: 'https://img.youtube.com/vi/r6K0uKz12C8/hqdefault.jpg',
+    desc: 'Qualificação técnica prática sobre técnicas de solda elétrica em serralheria e caldeiraria industrial. Aprenda a regular a inversora, abrir o arco de solda com segurança, aplicar cordões uniformes e trabalhar com processos MIG/MAG.',
+    category: 'Indústria',
+    duration: '6 aulas (55m)',
+    instructor: 'SENAI / Instrutor Técnico em Caldeiraria',
+    rating: 5.0,
+    level: 'Iniciante ao Intermediário',
+    lessons: [
+      { title: 'Aula 1: Fundamentos da Soldagem e Equipamentos de Proteção (EPIs)', duration: '9:30', done: false, youtubeId: 'r6K0uKz12C8' },
+      { title: 'Aula 2: Preparação da Peça e Regulagem da Máquina Inversora', duration: '8:15', done: false, youtubeId: 'J8eW3P4Q8aM' },
+      { title: 'Aula 3: Técnicas de Abertura de Arco e Cordão de Solda', duration: '10:40', done: false, youtubeId: 'v4K9L2P7W9k' },
+      { title: 'Aula 4: Processo MIG/MAG: Ajuste de Arame e Gás de Proteção', duration: '11:20', done: false, youtubeId: 'M8wZ2Q5L9bM' },
+      { title: 'Aula 5: Identificação e Correção de Defeitos Comuns na Solda', duration: '8:50', done: false, youtubeId: 'T5kL9P8W2aM' },
+      { title: 'Aula 6: Normas Técnicas e Segurança no Ambiente Industrial', duration: '7:15', done: false, youtubeId: 'P7kL9W2Q5bM' }
+    ],
+    completed: false
+  },
+  {
+    id: 'course-23',
+    title: 'Curso de Operação de Empilhadeira & Logística Fabril (NR-11)',
+    logo: 'Package',
+    coverImage: 'https://img.youtube.com/vi/bQd4U1SThd8/hqdefault.jpg',
+    desc: 'Curso teórico-prático sobre os princípios da movimentação segura de cargas industriais. Aprenda as diretrizes da norma regulamentadora NR-11, inspeção prévia de segurança (checklist), empilhamento correto e movimentação em corredores de estoque.',
+    category: 'Logística',
+    duration: '5 aulas (45m)',
+    instructor: 'Especialista em Logística Industrial',
+    rating: 5.0,
+    level: 'Iniciante ao Intermediário',
+    lessons: [
+      { title: 'Aula 1: Introdução à Operação de Empilhadeiras e Regras NR-11', duration: '10:15', done: false, youtubeId: 'bQd4U1SThd8' },
+      { title: 'Aula 2: Componentes da Empilhadeira e Checagem Diária (Checklist)', duration: '8:40', done: false, youtubeId: '5lF9U5O3W9M' },
+      { title: 'Aula 3: Técnicas de Movimentação, Carga e Descarga de Paletes', duration: '9:20', done: false, youtubeId: '34x78sWJ2L0' },
+      { title: 'Aula 4: Manobras Seguras em Corredores Estreitos e Rampas', duration: '11:05', done: false, youtubeId: 'zL9Z2R4G8W0' },
+      { title: 'Aula 5: Normas de Segurança, Prevenção de Tombamentos e Conclusão', duration: '6:10', done: false, youtubeId: 'K9uW2E7T8aM' }
+    ],
+    completed: false
+  },
   {
     id: 'course-22',
     title: 'Curso de Desenho e Técnicas Artísticas',
