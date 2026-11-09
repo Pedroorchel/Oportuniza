@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { supabase, getAppRedirectUrl } from '../lib/supabaseClient';
 import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from '../lib/blockedAccounts';
 import { saveCompanyProfile } from '../lib/companyService';
-import { Mail, Lock, User, ArrowRight, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, ShieldAlert, Building2, Briefcase, Phone, MapPin, FileText, Sparkles, Headphones, KeyRound, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, ShieldAlert, Building2, Briefcase, Phone, MapPin, FileText, Sparkles, Headphones, KeyRound, CheckCircle2, Moon, Sun } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ScreenId, User as AppUser } from '../types';
 import { validateEmailAddress, validatePersonOrCompanyName, validateCnpj, containsOffensiveLanguage, validatePhoneNumber } from '../lib/securityValidation';
 import { COMPANY_LGPD_DECLARATION_SUMMARY, COMPANY_LGPD_CLAUSES } from '../lib/companyLGPD';
 import { recordAuditLog } from '../lib/auditLogService';
 import { ShieldCheck as ShieldCheckIcon } from 'lucide-react';
+import { useTheme } from '../lib/theme';
 
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
@@ -74,6 +75,8 @@ export default function AuthScreen({ onNavigate, defaultIsLogin = true, onLoginS
   const [responsibleName, setResponsibleName] = useState('');
   const [companySegment, setCompanySegment] = useState(COMPANY_SEGMENTS[0]);
   const [companyNeighborhood, setCompanyNeighborhood] = useState(ARAUCARIA_NEIGHBORHOODS[0]);
+
+  const [theme, toggleTheme] = useTheme();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -723,18 +726,22 @@ export default function AuthScreen({ onNavigate, defaultIsLogin = true, onLoginS
         setTempLoggedUser(newUser);
 
         // Enviar e-mail de ativação via backend
-        try {
-          await fetch('/api/send-registration-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              email: cleanEmail, 
-              code: registrationCode,
-              userName: newUser.name
-            })
-          });
-        } catch (mailErr) {
-          console.error("Falha ao enviar e-mail de ativação:", mailErr);
+        // Use a ref to ensure it's only sent once
+        if (!(window as any).registrationEmailSent) {
+          (window as any).registrationEmailSent = true;
+          try {
+            await fetch('/api/send-registration-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                email: cleanEmail, 
+                code: registrationCode,
+                userName: newUser.name
+              })
+            });
+          } catch (mailErr) {
+            console.error("Falha ao enviar e-mail de ativação:", mailErr);
+          }
         }
 
         // Troca para o estado de verificação
@@ -1768,15 +1775,22 @@ export default function AuthScreen({ onNavigate, defaultIsLogin = true, onLoginS
                       Voltar ao Login
                     </button>
                   ) : (
-                    <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">
-                      {isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}
+                    <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-500 dark:text-slate-400">
+                      <button 
+                        onClick={toggleTheme}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                        title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+                      >
+                        {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
+                      </button>
+                      <span>{isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}</span>
                       <button 
                         onClick={() => setIsLogin(!isLogin)}
-                        className="ml-2 text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer"
+                        className="text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer"
                       >
                         {isLogin ? 'Cadastre-se grátis' : 'Faça Login'}
                       </button>
-                    </p>
+                    </div>
                   )}
                 </div>
               )}

@@ -1,9 +1,12 @@
 import { 
   ArrowRight, 
-  Sparkles
+  Sparkles,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { ScreenId } from '../types';
 import DesktopLanding from './DesktopLanding';
+import { useTheme } from '../lib/theme';
 
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
@@ -24,8 +27,21 @@ interface LandingScreenProps {
 }
 
 export default function LandingScreen({ onNavigate }: LandingScreenProps) {
+  const [theme, toggleTheme] = useTheme();
+
   return (
     <div className="w-full h-full overflow-y-auto custom-scroll bg-[#F8FAFC] dark:bg-[#0B1120] text-slate-900 dark:text-slate-100 relative select-none transition-colors">
+      
+      {/* Theme Toggle */}
+      <div className="absolute top-4 right-4 z-50">
+        <button 
+          onClick={toggleTheme}
+          className="p-2.5 bg-white/90 dark:bg-slate-800/90 backdrop-blur rounded-2xl shadow-sm hover:bg-gray-100 dark:hover:bg-slate-700 transition-all border border-gray-100 dark:border-slate-700 text-gray-700 dark:text-gray-300"
+          title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+        >
+          {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-sky-500" />}
+        </button>
+      </div>
       {/* ========================================================================= */}
       {/* MOBILE VIEW (< md) - Modern, Native-Feel App Experience                  */}
       {/* ========================================================================= */}

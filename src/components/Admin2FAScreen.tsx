@@ -298,7 +298,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
           <div className="flex items-center justify-between text-xs text-slate-400 px-1 pt-1">
             <button
               type="button"
-              onClick={generateNewCode}
+              onClick={() => generateNewCode()}
               disabled={timer > 0}
               className={`font-semibold cursor-pointer flex items-center gap-1 transition-colors ${
                 timer > 0 ? 'text-slate-500 cursor-not-allowed' : 'text-cyan-400 hover:underline'

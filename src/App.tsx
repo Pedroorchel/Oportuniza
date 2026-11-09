@@ -5,6 +5,7 @@ import { mockJobs, mockCourses, loadJobsFromSupabase, loadCoursesFromSupabase } 
 import { supabase } from './lib/supabaseClient';
 import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from './lib/blockedAccounts';
 import { toast } from './lib/toast';
+import { useTheme } from './lib/theme';
 import ToastContainer from './components/ToastContainer';
 
 // Import our modular subcomponents
@@ -44,6 +45,7 @@ export default function App() {
   const [activePerk, setActivePerk] = useState<string | null>(null);
   const [jobsVersion, setJobsVersion] = useState(0);
   const [blockedNotice, setBlockedNotice] = useState<{ email: string; name?: string; reason?: string } | null>(null);
+  const [, toggleDarkMode] = useTheme();
 
   useEffect(() => {
     if (user?.email) {
@@ -1358,7 +1360,9 @@ export default function App() {
 
           {/* Landing Screen */}
           {currentScreen === 'landing' && (
-            <LandingScreen onNavigate={handleScreenNavigation} />
+            <LandingScreen 
+                onNavigate={handleScreenNavigation} 
+            />
           )}
 
           {/* Story Bio Screen */}
