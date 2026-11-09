@@ -53,7 +53,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
     location: 'Polo Industrial',
-    logoImg: '/src/assets/images/logo_petrobras_repar_1793965851183.jpg',
+    logoImg: '/assets/images/logo_petrobras_repar_1793965851183.jpg',
     initials: 'BR',
     salary: 'R$ 2.400'
   },
@@ -63,7 +63,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
     location: 'Centro',
-    logoImg: '/src/assets/images/logo_farmabem_1793965852222.jpg',
+    logoImg: '/assets/images/logo_farmabem_1793965852222.jpg',
     initials: 'FB',
     salary: 'R$ 1.650'
   },
@@ -73,7 +73,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'Aprendiz',
     badgeColor: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
     location: 'Thomaz Coelho',
-    logoImg: '/src/assets/images/logo_berneck_1793965852701.jpg',
+    logoImg: '/assets/images/logo_berneck_1793965852701.jpg',
     initials: 'BK',
     salary: 'R$ 890'
   },
@@ -83,7 +83,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
     location: 'Distrito Industrial',
-    logoImg: '/src/assets/images/logo_metalika_1793965852486.jpg',
+    logoImg: '/assets/images/logo_metalika_1793965852486.jpg',
     initials: 'IM',
     salary: 'R$ 1.820'
   },
@@ -93,7 +93,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
     location: 'Costeira',
-    logoImg: '/src/assets/images/logo_super_sul_1793965854342.jpg',
+    logoImg: '/assets/images/logo_super_sul_1793965854342.jpg',
     initials: 'SS',
     salary: 'R$ 1.480'
   },
@@ -103,7 +103,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20',
     location: 'Fazenda Velha',
-    logoImg: '/src/assets/images/logo_clinica_vida_1793965854270.jpg',
+    logoImg: '/assets/images/logo_clinica_vida_1793965854270.jpg',
     initials: 'VS',
     salary: 'R$ 1.500'
   },
@@ -113,7 +113,7 @@ const VACANCY_PARTNERS_ROW1: VacancyPartner[] = [
     type: 'Aprendiz',
     badgeColor: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
     location: 'Capela Velha',
-    logoImg: '/src/assets/images/logo_petrobras_repar_1793965851183.jpg',
+    logoImg: '/assets/images/logo_petrobras_repar_1793965851183.jpg',
     initials: 'NX',
     salary: 'R$ 820'
   }
@@ -126,7 +126,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
     location: 'Thomaz Coelho',
-    logoImg: '/src/assets/images/logo_logistica_rapida_1793965855652.jpg',
+    logoImg: '/assets/images/logo_logistica_rapida_1793965855652.jpg',
     initials: 'LR',
     salary: 'R$ 1.700'
   },
@@ -136,7 +136,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
     location: 'Polo Industrial',
-    logoImg: '/src/assets/images/logo_csn_araucaria_1793965855603.jpg',
+    logoImg: '/assets/images/logo_csn_araucaria_1793965855603.jpg',
     initials: 'CS',
     salary: 'R$ 2.100'
   },
@@ -146,7 +146,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20',
     location: 'Centro',
-    logoImg: '/src/assets/images/logo_farmabem_1793965852222.jpg',
+    logoImg: '/assets/images/logo_farmabem_1793965852222.jpg',
     initials: 'IT',
     salary: 'R$ 1.580'
   },
@@ -156,7 +156,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'Estágio',
     badgeColor: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20',
     location: 'Iguaçu',
-    logoImg: '/src/assets/images/logo_clinica_vida_1793965854270.jpg',
+    logoImg: '/assets/images/logo_clinica_vida_1793965854270.jpg',
     initials: 'TT',
     salary: 'R$ 950'
   },
@@ -166,7 +166,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
     location: 'Capela Velha',
-    logoImg: '/src/assets/images/logo_metalika_1793965852486.jpg',
+    logoImg: '/assets/images/logo_metalika_1793965852486.jpg',
     initials: 'MF',
     salary: 'R$ 1.750'
   },
@@ -176,7 +176,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
     location: 'Fazenda Velha',
-    logoImg: '/src/assets/images/logo_csn_araucaria_1793965855603.jpg',
+    logoImg: '/assets/images/logo_csn_araucaria_1793965855603.jpg',
     initials: 'EL',
     salary: 'R$ 1.600'
   },
@@ -186,7 +186,7 @@ const VACANCY_PARTNERS_ROW2: VacancyPartner[] = [
     type: 'CLT',
     badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
     location: 'Campina da Barra',
-    logoImg: '/src/assets/images/logo_super_sul_1793965854342.jpg',
+    logoImg: '/assets/images/logo_super_sul_1793965854342.jpg',
     initials: 'MG',
     salary: 'R$ 1.520'
   }

@@ -20,7 +20,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - Centro',
     lat: -25.5912,
     lng: -49.4150,
-    logo: '/src/assets/images/logo_farmabem_1793965852222.jpg',
+    logo: '/assets/images/logo_farmabem_1793965852222.jpg',
     dateString: 'Hoje',
     color: 'border-l-blue-500'
   },
@@ -42,7 +42,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - Polo Industrial / Petrobras',
     lat: -25.5650,
     lng: -49.3850,
-    logo: '/src/assets/images/logo_metalika_1793965852486.jpg',
+    logo: '/assets/images/logo_metalika_1793965852486.jpg',
     dateString: 'Ontem',
     color: 'border-l-blue-500'
   },
@@ -63,7 +63,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - Fazenda Velha',
     lat: -25.5780,
     lng: -49.4250,
-    logo: '/src/assets/images/logo_clinica_vida_1793965854270.jpg',
+    logo: '/assets/images/logo_clinica_vida_1793965854270.jpg',
     dateString: '2 dias atrás',
     color: 'border-l-blue-500'
   },
@@ -84,7 +84,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - Costeira',
     lat: -25.5650,
     lng: -49.4020,
-    logo: '/src/assets/images/logo_super_sul_1793965854342.jpg',
+    logo: '/assets/images/logo_super_sul_1793965854342.jpg',
     dateString: '3 dias atrás',
     color: 'border-l-red-500'
   },
@@ -106,7 +106,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - Thomaz Coelho',
     lat: -25.5450,
     lng: -49.4100,
-    logo: '/src/assets/images/logo_logistica_rapida_1793965855652.jpg',
+    logo: '/assets/images/logo_logistica_rapida_1793965855652.jpg',
     dateString: '5 dias atrás',
     color: 'border-l-blue-500'
   },
@@ -194,7 +194,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - PR',
     lat: -25.5980,
     lng: -49.4250,
-    logo: '/src/assets/images/logo_csn_araucaria_1793965855603.jpg',
+    logo: '/assets/images/logo_csn_araucaria_1793965855603.jpg',
     dateString: '2 dias atrás',
     color: 'border-l-teal-500'
   },
@@ -216,7 +216,7 @@ const DEFAULT_JOBS: Job[] = [
     location: 'Araucária - PR',
     lat: -25.5680,
     lng: -49.3820,
-    logo: '/src/assets/images/logo_metalika_1793965852486.jpg',
+    logo: '/assets/images/logo_metalika_1793965852486.jpg',
     dateString: '4 dias atrás',
     color: 'border-l-orange-500'
   }
@@ -240,7 +240,7 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     location: 'Araucária - PR',
     lat: -25.5780,
     lng: -49.4050,
-    logo: '/src/assets/images/logo_berneck_1793965852701.jpg',
+    logo: '/assets/images/logo_berneck_1793965852701.jpg',
     dateString: 'Hoje',
     color: 'border-l-indigo-500',
     active: true

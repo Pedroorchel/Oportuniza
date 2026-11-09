@@ -8,15 +8,15 @@ import DesktopLanding from './DesktopLanding';
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
 const MOBILE_VACANCY_LOGOS = [
-  { company: 'Petrobras REPAR', role: 'Operador Jr.', type: 'CLT', logoImg: '/src/assets/images/logo_petrobras_repar_1793965851183.jpg', location: 'Araucária' },
-  { company: 'FarmaBem', role: 'Atendente', type: 'CLT', logoImg: '/src/assets/images/logo_farmabem_1793965852222.jpg', location: 'Centro' },
-  { company: 'Berneck S.A.', role: 'Aprendiz', type: 'Aprendiz', logoImg: '/src/assets/images/logo_berneck_1793965852701.jpg', location: 'Thomaz C.' },
-  { company: 'Indústria Metálika', role: 'Produção', type: 'CLT', logoImg: '/src/assets/images/logo_metalika_1793965852486.jpg', location: 'Distrito Ind.' },
-  { company: 'Supermercados Sul', role: 'Caixa & Balcão', type: 'CLT', logoImg: '/src/assets/images/logo_super_sul_1793965854342.jpg', location: 'Costeira' },
-  { company: 'Clínica Vida', role: 'Recepcionista', type: 'CLT', logoImg: '/src/assets/images/logo_clinica_vida_1793965854270.jpg', location: 'Fazenda V.' },
-  { company: 'Logística Rápida', role: 'Assist. Log.', type: 'CLT', logoImg: '/src/assets/images/logo_logistica_rapida_1793965855652.jpg', location: 'Araucária' },
-  { company: 'CSN Aços', role: 'Operador', type: 'CLT', logoImg: '/src/assets/images/logo_csn_araucaria_1793965855603.jpg', location: 'Araucária' },
-  { company: 'Nexus Corp', role: 'Jovem Aprendiz', type: 'Aprendiz', logoImg: '/src/assets/images/logo_petrobras_repar_1793965851183.jpg', location: 'Capela Velha' },
+  { company: 'Petrobras REPAR', role: 'Operador Jr.', type: 'CLT', logoImg: '/assets/images/logo_petrobras_repar_1793965851183.jpg', location: 'Araucária' },
+  { company: 'FarmaBem', role: 'Atendente', type: 'CLT', logoImg: '/assets/images/logo_farmabem_1793965852222.jpg', location: 'Centro' },
+  { company: 'Berneck S.A.', role: 'Aprendiz', type: 'Aprendiz', logoImg: '/assets/images/logo_berneck_1793965852701.jpg', location: 'Thomaz C.' },
+  { company: 'Indústria Metálika', role: 'Produção', type: 'CLT', logoImg: '/assets/images/logo_metalika_1793965852486.jpg', location: 'Distrito Ind.' },
+  { company: 'Supermercados Sul', role: 'Caixa & Balcão', type: 'CLT', logoImg: '/assets/images/logo_super_sul_1793965854342.jpg', location: 'Costeira' },
+  { company: 'Clínica Vida', role: 'Recepcionista', type: 'CLT', logoImg: '/assets/images/logo_clinica_vida_1793965854270.jpg', location: 'Fazenda V.' },
+  { company: 'Logística Rápida', role: 'Assist. Log.', type: 'CLT', logoImg: '/assets/images/logo_logistica_rapida_1793965855652.jpg', location: 'Araucária' },
+  { company: 'CSN Aços', role: 'Operador', type: 'CLT', logoImg: '/assets/images/logo_csn_araucaria_1793965855603.jpg', location: 'Araucária' },
+  { company: 'Nexus Corp', role: 'Jovem Aprendiz', type: 'Aprendiz', logoImg: '/assets/images/logo_petrobras_repar_1793965851183.jpg', location: 'Capela Velha' },
 ];
 
 interface LandingScreenProps {
