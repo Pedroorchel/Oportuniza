@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://sqqiqmzrhmgrtkborskf.supabase.co';
+const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ckzygdwhihybrdzctdup.supabase.co';
 const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QHYzyrfocbKo60XS5EFYBA_Js8u-l0O';
 
 // Sanitize URL to ensure standard Supabase base URL format (without /rest/v1 or trailing slashes)

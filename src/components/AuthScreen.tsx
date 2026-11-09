@@ -198,10 +198,6 @@ export default function AuthScreen({ onNavigate, defaultIsLogin = true, onLoginS
         provider: 'google',
         options: {
           redirectTo: getAppRedirectUrl(),
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
         },
       });
       if (error) throw error;

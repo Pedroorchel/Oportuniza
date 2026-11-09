@@ -56,7 +56,7 @@ app.all("/api/supabase-proxy", async (req: any, res: any) => {
   }
 
   // Permite apenas requisições ao projeto Supabase do usuário
-  const defaultSupabaseUrl = "https://sqqiqmzrhmgrtkborskf.supabase.co";
+  const defaultSupabaseUrl = "https://ckzygdwhihybrdzctdup.supabase.co";
   const supabaseUrl = (process.env.VITE_SUPABASE_URL || defaultSupabaseUrl).replace(/\/$/, "");
   const allowedHost = new URL(supabaseUrl).host;
   
