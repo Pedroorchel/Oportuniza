@@ -635,7 +635,8 @@ export default function App() {
                     education: 'Ensino Médio em andamento',
                     experience: 'Nenhuma registrada',
                     phone: '',
-                    skills: []
+                    skills: [],
+                    status: 'pending' // Force verification for new OAuth users
                   }, { onConflict: 'id' });
                 console.log("Profile created successfully in database for:", initialUser.email);
               } catch (upsertErr) {
