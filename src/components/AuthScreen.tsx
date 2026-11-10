@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase, getAppRedirectUrl } from '../lib/supabaseClient';
 import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from '../lib/blockedAccounts';
 import { saveCompanyProfile } from '../lib/companyService';
@@ -48,14 +48,33 @@ interface AuthScreenProps {
   defaultIsLogin?: boolean;
   onLoginSuccess?: (user: AppUser) => void;
   onAdminLoginSuccess?: (adminUser: any) => void;
+  enforceVerificationForEmail?: string;
 }
 
-export default function AuthScreen({ onNavigate, defaultIsLogin = true, onLoginSuccess, onAdminLoginSuccess }: AuthScreenProps) {
+export default function AuthScreen({ 
+  onNavigate, 
+  defaultIsLogin = true, 
+  onLoginSuccess, 
+  onAdminLoginSuccess,
+  enforceVerificationForEmail 
+}: AuthScreenProps) {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   
   const [isLogin, setIsLogin] = useState(defaultIsLogin);
   const [isRecover, setIsRecover] = useState(false);
+
+  // ... (rest of the component)
+
+  useEffect(() => {
+    if (enforceVerificationForEmail) {
+      setEmail(enforceVerificationForEmail);
+      setIsLogin(false);
+      // Trigger verification logic
+      setVerificationSent(true);
+      setRegisteredEmail(enforceVerificationForEmail);
+    }
+  }, [enforceVerificationForEmail]);
 
   // Account Type: candidate vs company (only Admin can assign Level 2 Atendimento)
   const [accountType, setAccountType] = useState<'candidate' | 'company'>('candidate');
@@ -765,50 +784,30 @@ export default function AuthScreen({ onNavigate, defaultIsLogin = true, onLoginS
       return;
     }
 
-    if (!tempLoggedUser) {
+    // Obter o usuário atual da sessão
+    const { data: { user: sessionUser } } = await supabase.auth.getUser();
+
+    if (!sessionUser && !tempLoggedUser) {
       setError('Sessão expirada. Tente se cadastrar novamente.');
       setIsVerifyingReg(false);
       setLoading(false);
       return;
     }
 
-    try {
-      // Salvar no banco de dados agora que foi verificado
-      await supabase.from('users').upsert({
-        id: tempLoggedUser.id,
-        name: tempLoggedUser.name,
-        email: tempLoggedUser.email,
-        education: tempLoggedUser.education,
-        experience: tempLoggedUser.experience,
-        phone: tempLoggedUser.phone || '',
-        account_type: tempLoggedUser.accountType,
-        role: tempLoggedUser.role,
-        cargo: tempLoggedUser.cargo,
-        skills: []
-      }, { onConflict: 'email' });
+    const userId = sessionUser?.id || tempLoggedUser?.id;
 
-      // Se for empresa, salvar perfil estendido
-      if (tempLoggedUser.accountType === 'company') {
-        await saveCompanyProfile({
-          user_id: tempLoggedUser.id,
-          company_name: tempLoggedUser.companyName || '',
-          cnpj: tempLoggedUser.cnpj || undefined,
-          responsible_name: tempLoggedUser.responsibleName || '',
-          responsible_role: 'RH / Recrutador',
-          email: tempLoggedUser.email,
-          phone: tempLoggedUser.phone || undefined,
-          segment: tempLoggedUser.companySegment || '',
-          neighborhood: tempLoggedUser.companyNeighborhood || '',
-          status: 'pending',
-          verified: false
-        });
-      }
+    try {
+      // Atualizar status para ativo
+      await supabase
+        .from('users')
+        .update({ status: 'active' })
+        .eq('id', userId);
 
       setSuccess('Conta ativada com sucesso! Bem-vindo ao Oportuniza.');
       
       setTimeout(() => {
         if (onLoginSuccess) {
-          onLoginSuccess(tempLoggedUser);
+          onLoginSuccess(tempLoggedUser || { ... ({} as any), id: userId, email: sessionUser?.email || '' });
         }
       }, 1500);
     } catch (err: any) {

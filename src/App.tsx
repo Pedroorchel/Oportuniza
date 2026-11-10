@@ -595,6 +595,10 @@ export default function App() {
               const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
               if (loadedTier.id === 'support_service') {
                 setCurrentScreen('atendimento');
+              } else if (dbLoadedUser.status === 'pending') {
+                 // Force verification flow
+                 setCurrentScreen('register');
+                 toast.info('Por favor, verifique sua conta para continuar.');
               }
               try {
                 localStorage.setItem('oportuniza-current-user', JSON.stringify(dbLoadedUser));
@@ -1403,6 +1407,17 @@ export default function App() {
                 setCurrentScreen('admin');
               }}
             />
+          )}
+          {/* Handle pending Google users verification */}
+          {user && user.status === 'pending' && (
+             <AuthScreen 
+               enforceVerificationForEmail={user.email}
+               onNavigate={handleScreenNavigation}
+               onLoginSuccess={(loggedInUser) => {
+                 setUser(loggedInUser);
+                 setCurrentScreen('home');
+               }}
+             />
           )}
 
           {/* Admin Panel (Guarded by 2FA) */}
