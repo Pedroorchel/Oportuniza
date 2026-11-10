@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Lock, KeyRound, Smartphone, Mail, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Sparkles, Copy, Check } from 'lucide-react';
+import { ShieldCheck, Lock, KeyRound, Mail, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User } from '../types';
 import { recordAuditLog } from '../lib/auditLogService';
+import {
+  sendVerificationCodeEmail,
+  verifySupabaseOtpCode,
+  VerificationDeliveryMethod
+} from '../lib/emailVerificationService';
+import { markSession2FAVerified } from '../lib/twoFactorSession';
 
 interface Admin2FAScreenProps {
   user: User;
@@ -17,7 +23,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
+  const [deliveryMethod, setDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
   const [emailStatus, setEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -34,6 +40,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
     setTimer(60);
     setDigits(['', '', '', '', '', '']);
     setErrorMsg(null);
+    setDeliveryMethod('smtp');
     setTimeout(() => {
       inputRefs.current[0]?.focus();
     }, 100);
@@ -44,27 +51,31 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
 
   const send2FAEmail = async (codeToSend: string) => {
     setEmailStatus({ sending: true });
-    try {
-      const res = await fetch('/api/send-2fa-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: user.email,
-          code: codeToSend,
-          userName: user.name
-        })
+    const result = await sendVerificationCodeEmail({
+      email: user.email,
+      code: codeToSend,
+      userName: user.name,
+      kind: 'admin-2fa',
+      isAdmin: true
+    });
+
+    if (result.delivered) {
+      setDeliveryMethod(result.deliveryMethod || 'smtp');
+      setEmailStatus({
+        sending: false,
+        delivered: true,
+        message:
+          result.message ||
+          `E-mail enviado via ${result.providerLabel || 'oportunizahw@gmail.com'} para ${user.email}!`
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.delivered) {
-        setEmailStatus({ sending: false, delivered: true, message: `E-mail enviado via oportunizahw@gmail.com para ${user.email}!` });
-      } else if (res.ok) {
-        setEmailStatus({ sending: false, delivered: false, message: data?.message || `Código gerado para ${user.email}.` });
-      } else {
-        setEmailStatus({ sending: false, delivered: false, message: `Não foi possível conectar ao servidor de e-mail agora. Tente reenviar em instantes.` });
-      }
-    } catch (err) {
-      console.warn("Could not send 2FA email:", err);
-      setEmailStatus({ sending: false, delivered: false, message: `Erro ao disparar e-mail para ${user.email}. Tente reenviar.` });
+    } else {
+      setEmailStatus({
+        sending: false,
+        delivered: false,
+        message:
+          result.error ||
+          `Não foi possível enviar o e-mail de verificação para ${user.email}. Tente reenviar em instantes.`
+      });
     }
   };
 
@@ -124,9 +135,29 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
     setIsVerifying(true);
     setErrorMsg(null);
 
-    await new Promise((r) => setTimeout(r, 600));
+    const cleanCode = codeToVerify.trim();
+    let isMatch = false;
+    let verifiedUserId = user.id || '';
 
-    if (codeToVerify === generatedCode || codeToVerify === '123456' || codeToVerify === '000000') {
+    if (deliveryMethod === 'supabase-otp') {
+      const otpCheck = await verifySupabaseOtpCode(user.email, cleanCode);
+      if (otpCheck.verified) {
+        isMatch = true;
+        if (otpCheck.userId) {
+          verifiedUserId = otpCheck.userId;
+        }
+      } else {
+        setIsVerifying(false);
+        setErrorMsg('Código 2FA incorreto ou expirado. Confira o e-mail recebido e tente novamente.');
+        return;
+      }
+    } else {
+      await new Promise((r) => setTimeout(r, 400));
+      isMatch = Boolean(generatedCode) && cleanCode === generatedCode;
+    }
+
+    if (isMatch) {
+      markSession2FAVerified(verifiedUserId, user.email || '');
       setIsSuccess(true);
       
       try {
@@ -146,26 +177,11 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
 
       setTimeout(() => {
         onVerified();
-      }, 700);
+      }, 650);
     } else {
       setIsVerifying(false);
-      setErrorMsg('Código de verificação incorreto. Verifique o código exibido e tente novamente.');
+      setErrorMsg('Código de verificação incorreto. Verifique o código enviado por e-mail e tente novamente.');
     }
-  };
-
-  // Quick fill helper button for convenience
-  const handleAutoFillCode = () => {
-    if (!generatedCode) return;
-    const split = generatedCode.split('');
-    setDigits(split);
-    verifyCode(generatedCode);
-  };
-
-  const handleCopyCode = () => {
-    if (!generatedCode) return;
-    navigator.clipboard.writeText(generatedCode);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
   };
 
   return (
@@ -229,7 +245,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
             <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-[11px] font-medium flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <span className="leading-relaxed">
-                E-mail de verificação enviado via <strong>oportunizahw@gmail.com</strong> para <strong>{user.email}</strong>. Abra sua caixa de entrada para obter o código de 6 dígitos.
+                {emailStatus.message || `E-mail de verificação enviado via oportunizahw@gmail.com para ${user.email}. Abra sua caixa de entrada para obter o código de 6 dígitos.`}
               </span>
             </div>
           )}
@@ -244,11 +260,19 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
                 ref={(el) => { inputRefs.current[idx] = el; }}
                 type="text"
                 inputMode="numeric"
-                maxLength={1}
+                maxLength={6}
                 value={digit}
                 onChange={(e) => handleDigitChange(idx, e.target.value)}
+                onPaste={(e) => {
+                  const pasted = e.clipboardData.getData('text').replace(/\D/g, '');
+                  if (pasted.length >= 6) {
+                    e.preventDefault();
+                    handleDigitChange(idx, pasted);
+                  }
+                }}
                 onKeyDown={(e) => handleKeyDown(idx, e)}
                 disabled={isVerifying || isSuccess}
+                aria-label={`Dígito ${idx + 1} do código 2FA administrativo`}
                 className={`w-11 sm:w-12 h-14 bg-slate-950 text-center font-mono font-black text-xl text-white rounded-xl border transition-all focus:outline-hidden ${
                   errorMsg
                     ? 'border-rose-500/80 bg-rose-950/20'
@@ -309,12 +333,12 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
             <button
               type="button"
               onClick={() => generateNewCode()}
-              disabled={timer > 0}
+              disabled={timer > 0 || emailStatus.sending}
               className={`font-semibold cursor-pointer flex items-center gap-1 transition-colors ${
-                timer > 0 ? 'text-slate-500 cursor-not-allowed' : 'text-cyan-400 hover:underline'
+                timer > 0 || emailStatus.sending ? 'text-slate-500 cursor-not-allowed' : 'text-cyan-400 hover:underline'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${timer > 0 ? '' : 'text-cyan-400'}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${emailStatus.sending ? 'animate-spin' : timer > 0 ? '' : 'text-cyan-400'}`} />
               <span>Reenviar Código</span>
             </button>
 

@@ -65,7 +65,7 @@ export default function SettingsScreen({
   const [generalNotifications, setGeneralNotifications] = useState<boolean>(user?.notificationsEnabled ?? true);
   const [marketingEmails, setMarketingEmails] = useState<boolean>(user?.marketingEmailsEnabled ?? false);
   const [courseAlerts, setCourseAlerts] = useState<boolean>(true);
-  const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(user?.is2FAEnabled ?? true);
+  const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(true);
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission | 'unsupported'>('default');
 
   // Password modal / inline states
@@ -88,44 +88,29 @@ export default function SettingsScreen({
     }
   }, []);
 
-  // Synchronize state with user prop
+  // Synchronize state with user prop (2FA is always mandatory)
   useEffect(() => {
     if (user) {
       setTiJobsPush(user.tiJobsPushEnabled ?? false);
       setGeneralNotifications(user.notificationsEnabled ?? true);
       setMarketingEmails(user.marketingEmailsEnabled ?? false);
-      setIs2FAEnabled(user.is2FAEnabled ?? true);
+      setIs2FAEnabled(true);
     }
   }, [user]);
 
-  const handleToggle2FA = async (enabled: boolean) => {
-    setIs2FAEnabled(enabled);
-    if (user) {
-      const updatedUser: User = {
-        ...user,
-        is2FAEnabled: enabled
-      };
-      onSetUser(updatedUser);
-
+  const handleLocked2FAInfo = async () => {
+    setIs2FAEnabled(true);
+    if (user?.id) {
       try {
-        if (user.email) {
-          localStorage.setItem(`oportuniza-2fa-${user.email}`, JSON.stringify(enabled));
-        }
-        if (user.id) {
-          await supabase
-            .from('users')
-            .update({ is_2fa_enabled: enabled })
-            .eq('id', user.id);
-        }
+        await supabase
+          .from('users')
+          .update({ is_2fa_enabled: true })
+          .eq('id', user.id);
       } catch (e) {
         console.warn('Sync 2FA warning:', e);
       }
     }
-    if (enabled) {
-      toast.success('🔒 Verificação em Duas Etapas (2FA) ativada!');
-    } else {
-      toast.info('Verificação em Duas Etapas (2FA) desativada.');
-    }
+    toast.info('Verificação em Duas Etapas (2FA) é obrigatória para todas as contas do Oportuniza.');
   };
 
   // Push Notifications Toggle Handler for TI Jobs
@@ -693,33 +678,28 @@ export default function SettingsScreen({
 
           {!showPasswordSection ? (
             <div className="flex flex-col gap-2.5">
-              {/* Toggle 2FA */}
+              {/* Mandatory 2FA Status */}
               <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-slate-800/60 flex items-center justify-between gap-3 border border-gray-100 dark:border-slate-800/80">
                 <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-bold text-gray-800 dark:text-gray-200">
                       Verificação de 2 Etapas (2FA)
                     </span>
-                    <span className="px-1.5 py-0.5 bg-indigo-500/15 text-indigo-500 text-[10px] font-black rounded-md uppercase">
-                      Recomendado
+                    <span className="px-2 py-0.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-black rounded-md uppercase">
+                      Obrigatório · Ativo
                     </span>
                   </div>
                   <span className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Aumente a segurança exigindo um código enviado ao seu e-mail no login
+                    Proteção máxima ativa: código de segurança enviado ao seu e-mail em todo login
                   </span>
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleToggle2FA(!is2FAEnabled)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer ${
-                    is2FAEnabled ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-slate-700'
-                  }`}
+                  onClick={handleLocked2FAInfo}
+                  aria-label="Verificação em duas etapas obrigatória e ativa"
+                  className="relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer bg-indigo-500"
                 >
-                  <span
-                    className={`h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform ${
-                      is2FAEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
+                  <span className="h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform translate-x-5" />
                 </button>
               </div>
 

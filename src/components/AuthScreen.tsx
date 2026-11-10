@@ -10,6 +10,16 @@ import { COMPANY_LGPD_DECLARATION_SUMMARY, COMPANY_LGPD_CLAUSES } from '../lib/c
 import { recordAuditLog } from '../lib/auditLogService';
 import { ShieldCheck as ShieldCheckIcon } from 'lucide-react';
 import { useTheme } from '../lib/theme';
+import {
+  sendVerificationCodeEmail,
+  verifySupabaseOtpCode,
+  buildApiEndpoint,
+  VerificationDeliveryMethod
+} from '../lib/emailVerificationService';
+import {
+  markSession2FAVerified,
+  clearSession2FAVerification
+} from '../lib/twoFactorSession';
 
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
@@ -121,6 +131,7 @@ export default function AuthScreen({
   const [sentRegCode, setSentRegCode] = useState('');
   const [tempLoggedUser, setTempLoggedUser] = useState<AppUser | null>(null);
   const [regTimer, setRegTimer] = useState(0);
+  const [regDeliveryMethod, setRegDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
   const [regEmailStatus, setRegEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
   const regDispatchLockRef = useRef<{ email: string; at: number } | null>(null);
 
@@ -129,14 +140,9 @@ export default function AuthScreen({
   const [oauthCodeInput, setOauthCodeInput] = useState('');
   const [oauthSentCode, setOauthSentCode] = useState('');
   const [oauthTimer, setOauthTimer] = useState(0);
+  const [oauthDeliveryMethod, setOauthDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
   const [oauthEmailStatus, setOauthEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
   const oauthDispatchedEmailRef = useRef<string | null>(null);
-
-  // Login 2FA states
-  const [isVerifying2FA, setIsVerifying2FA] = useState(false);
-  const [login2FACodeInput, setLogin2FACodeInput] = useState('');
-  const [sentLogin2FACode, setSentLogin2FACode] = useState('');
-  const [pendingUser, setPendingUser] = useState<AppUser | null>(null);
 
   useEffect(() => {
     if (!enforceVerificationUser) {
@@ -206,20 +212,24 @@ export default function AuthScreen({
     setSuccess(null);
 
     if (adminPassword === '06042025') {
-      setSuccess('Acesso administrativo autorizado! Carregando painel...');
+      clearSession2FAVerification();
+      setSuccess('Credenciais validadas! Redirecionando para verificação 2FA...');
       const adminUser = {
         id: '00000000-0000-4000-8000-000000000604',
         name: 'Administrador Orchent',
         email: 'oportunizahw@gmail.com',
         avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-        isAdmin: true
+        isAdmin: true,
+        role: 'Administrador',
+        cargo: 'Administrador',
+        is2FAEnabled: true
       };
       setTimeout(() => {
         setLoading(false);
         if (onAdminLoginSuccess) {
           onAdminLoginSuccess(adminUser);
         }
-      }, 1000);
+      }, 650);
     } else {
       setLoading(false);
       setError('E-mail ou senha do administrador incorretos.');
@@ -229,6 +239,7 @@ export default function AuthScreen({
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError(null);
+    clearSession2FAVerification();
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -246,6 +257,7 @@ export default function AuthScreen({
   const handleGitHubLogin = async () => {
     setLoading(true);
     setError(null);
+    clearSession2FAVerification();
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
@@ -306,7 +318,7 @@ export default function AuthScreen({
         setSentRecoveryCode(generatedCode);
 
         try {
-          await fetch('/api/send-password-recovery-email', {
+          await fetch(buildApiEndpoint('/api/send-password-recovery-email'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: cleanRecEmail, code: generatedCode })
@@ -371,7 +383,7 @@ export default function AuthScreen({
           }
 
           // 1. Chamar o endpoint dedicado no backend que atualiza o banco de dados
-          const response = await fetch('/api/update-password', {
+          const response = await fetch(buildApiEndpoint('/api/update-password'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: cleanRecEmail, newPassword: newPassword })
@@ -522,6 +534,9 @@ export default function AuthScreen({
 
     try {
       if (isLogin) {
+        // Sempre limpar a verificação 2FA da sessão anterior em qualquer nova tentativa de login
+        clearSession2FAVerification();
+
         // 1. Verificação prévia de bloqueio rigorosa (banco de dados e cache)
         const isPreBlocked = await isAccountBlocked({ email: cleanEmail });
         if (isPreBlocked) {
@@ -534,7 +549,6 @@ export default function AuthScreen({
         let authResult = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
         
         if (authResult.error) {
-          // If Supabase auth provider has email disabled, allow direct email/password fallback via database users table
           console.warn("Supabase signInWithPassword returned error:", authResult.error.message);
           
           const { data: dbUserMatch } = await supabase
@@ -544,28 +558,52 @@ export default function AuthScreen({
             .maybeSingle();
 
           if (dbUserMatch) {
-            // Se o usuário possui senha cadastrada no banco e a senha não confere, rejeita com E-mail ou senha incorretos
-            if (dbUserMatch.password && dbUserMatch.password !== password) {
+            if (isUserRecordBlocked(dbUserMatch)) {
+              const reason = extractBlockReasonFromRecord(dbUserMatch) || await fetchAccountBlockReason({ id: dbUserMatch.id, email: cleanEmail });
+              setError(`Esta conta foi bloqueada pelo administrador. Motivo: "${reason}". Acesso negado e revogado.`);
+              setLoading(false);
+              return;
+            }
+
+            // Só permite fallback se a senha cadastrada na tabela public.users conferir exatamente
+            if (!dbUserMatch.password || dbUserMatch.password !== password) {
               setError('E-mail ou senha incorretos.');
               setLoading(false);
               return;
             }
 
-            // Valid user found in database, allow login
-            console.log("Allowing direct DB user login fallback:", cleanEmail);
+            const isDbAdmin = Boolean(
+              dbUserMatch.is_admin ||
+              dbUserMatch.role === 'Administrador' ||
+              dbUserMatch.cargo === 'Administrador' ||
+              cleanEmail === 'oportunizahw@gmail.com'
+            );
+            const isDbCompany =
+              String(dbUserMatch.account_type || '').toLowerCase() === 'company' ||
+              String(dbUserMatch.role || '').toLowerCase() === 'empresa' ||
+              String(dbUserMatch.cargo || '').toLowerCase() === 'empresa';
+
             const fallbackUser: AppUser = {
               id: dbUserMatch.id || 'usr-' + Date.now(),
               name: dbUserMatch.name || cleanEmail.split('@')[0],
               email: cleanEmail,
               avatarUrl: dbUserMatch.avatar_url || '',
               bio: dbUserMatch.bio || '',
-              education: dbUserMatch.education || 'Ensino Médio',
+              education: dbUserMatch.education || (isDbCompany ? 'Empresa / Empregador' : 'Ensino Médio'),
               experience: dbUserMatch.experience || '',
               phone: dbUserMatch.phone || '',
               skills: Array.isArray(dbUserMatch.skills) ? dbUserMatch.skills : [],
-              isAdmin: Boolean(dbUserMatch.is_admin || cleanEmail === 'oportunizahw@gmail.com'),
-              role: dbUserMatch.role || 'Candidato',
-              cargo: dbUserMatch.cargo || 'Estudante'
+              accountType: isDbCompany ? 'company' : 'candidate',
+              companyName: dbUserMatch.company_name || undefined,
+              cnpj: dbUserMatch.cnpj || undefined,
+              companySegment: dbUserMatch.company_segment || undefined,
+              companyNeighborhood: dbUserMatch.company_neighborhood || undefined,
+              responsibleName: dbUserMatch.responsible_name || undefined,
+              status: String(dbUserMatch.status || '').toLowerCase() === 'pending' ? 'pending' : 'active',
+              isAdmin: isDbAdmin,
+              role: dbUserMatch.role || (isDbAdmin ? 'Administrador' : isDbCompany ? 'Empresa' : 'Candidato'),
+              cargo: dbUserMatch.cargo || (isDbAdmin ? 'Administrador' : isDbCompany ? 'Empresa' : 'Estudante'),
+              is2FAEnabled: true
             };
 
             setLoading(false);
@@ -574,15 +612,16 @@ export default function AuthScreen({
             }
             return;
           } else {
-            // Also allow special admin login or demo login if credentials match
-            if (cleanEmail === 'oportunizahw@gmail.com') {
+            // Admin fallback (exige senha administrativa válida e obriga 2FA na próxima tela)
+            if (cleanEmail === 'oportunizahw@gmail.com' && password === '06042025') {
               const adminFallback: AppUser = {
-                id: 'admin-fallback-id',
-                name: 'Administrador Oportuniza',
+                id: '00000000-0000-4000-8000-000000000604',
+                name: 'Administrador Orchent',
                 email: cleanEmail,
                 isAdmin: true,
                 role: 'Administrador',
-                cargo: 'Administrador'
+                cargo: 'Administrador',
+                is2FAEnabled: true
               };
               setLoading(false);
               if (onLoginSuccess) {
@@ -609,51 +648,71 @@ export default function AuthScreen({
           }
 
           const meta = data.user.user_metadata || {};
-          const isComp = meta.account_type === 'company';
-
-          let userRole = meta.role || meta.cargo || (isComp ? 'Empresa' : 'Candidato');
-          let userCargo = meta.cargo || meta.role || (isComp ? 'Empresa' : 'Estudante');
-          let is2fa = false;
+          let dbUser: any = null;
+          let companyRow: any = null;
 
           try {
-            const { data: dbUser } = await supabase.from('users').select('*').eq('id', data.user.id).maybeSingle();
-            if (dbUser) {
-              if (dbUser.role || dbUser.cargo) {
-                userRole = dbUser.role || dbUser.cargo;
-                userCargo = dbUser.cargo || dbUser.role;
-              }
-              is2fa = !!dbUser.is_2fa_enabled;
+            const { data: uRow } = await supabase.from('users').select('*').eq('id', data.user.id).maybeSingle();
+            dbUser = uRow;
+            if (!dbUser && cleanEmail) {
+              const { data: uByEmail } = await supabase.from('users').select('*').ilike('email', cleanEmail).maybeSingle();
+              dbUser = uByEmail;
+            }
+            if (cleanEmail) {
+              const { data: cRow } = await supabase.from('companies').select('*').ilike('email', cleanEmail).maybeSingle();
+              companyRow = cRow;
             }
           } catch (e) {}
 
-          const loggedUser: AppUser = {
-            id: data.user.id,
-            name: meta.full_name || (isComp ? meta.company_name : null) || data.user.email?.split('@')[0] || 'Usuário',
-            email: data.user.email || '',
-            avatarUrl: meta.avatar_url || '',
-            bio: meta.bio || (isComp ? `Empresa atuante no setor ${meta.company_segment || 'Comércio'} em Araucária` : ''),
-            education: meta.education || (isComp ? 'Empresa / Empregador' : 'Ensino Médio em andamento'),
-            experience: meta.experience || (isComp ? 'Empresa Contratante em Araucária' : 'Nenhuma registrada'),
-            phone: meta.phone || '',
-            skills: meta.skills || [],
-            favorites: [],
-            accountType: meta.account_type || 'candidate',
-            companyName: meta.company_name,
-            cnpj: meta.cnpj,
-            companySegment: meta.company_segment,
-            companyNeighborhood: meta.company_neighborhood,
-            responsibleName: meta.responsible_name,
-            role: userRole,
-            cargo: userCargo,
-            is2FAEnabled: is2fa
-          };
-
-          // Admins skip this 2FA because they have a dedicated Admin2FAScreen in App.tsx
-          if (is2fa && !loggedUser.isAdmin) {
-            await triggerLogin2FA(loggedUser);
+          if (dbUser && isUserRecordBlocked(dbUser)) {
+            await supabase.auth.signOut();
+            const reason = extractBlockReasonFromRecord(dbUser) || await fetchAccountBlockReason({ id: data.user.id, email: cleanEmail });
+            setError(`Esta conta foi bloqueada pelo administrador. Motivo: "${reason}". Acesso negado e revogado.`);
+            setLoading(false);
             return;
           }
 
+          const isAdminUser = Boolean(
+            dbUser?.is_admin ||
+            meta.is_admin ||
+            dbUser?.role === 'Administrador' ||
+            dbUser?.cargo === 'Administrador' ||
+            cleanEmail === 'oportunizahw@gmail.com'
+          );
+
+          const rawType = String(dbUser?.account_type || meta.account_type || '').toLowerCase();
+          const rawRole = String(dbUser?.role || dbUser?.cargo || meta.role || meta.cargo || '').toLowerCase();
+          const isComp = rawType === 'company' || rawRole === 'empresa';
+
+          const userRole = dbUser?.role || meta.role || meta.cargo || (isAdminUser ? 'Administrador' : (isComp ? 'Empresa' : 'Candidato'));
+          const userCargo = dbUser?.cargo || meta.cargo || meta.role || (isAdminUser ? 'Administrador' : (isComp ? 'Empresa' : 'Estudante'));
+          const isPendingInDb = String(dbUser?.status || '').toLowerCase() === 'pending';
+
+          const loggedUser: AppUser = {
+            id: data.user.id,
+            name: (isComp ? (companyRow?.company_name || dbUser?.company_name || meta.company_name) : null) || dbUser?.name || meta.full_name || data.user.email?.split('@')[0] || 'Usuário',
+            email: data.user.email || cleanEmail,
+            avatarUrl: dbUser?.avatar_url || meta.avatar_url || '',
+            bio: dbUser?.bio || meta.bio || (isComp ? `Empresa atuante no setor ${companyRow?.segment || meta.company_segment || 'Comércio'} em Araucária` : ''),
+            education: dbUser?.education || meta.education || (isComp ? 'Empresa / Empregador' : 'Ensino Médio em andamento'),
+            experience: dbUser?.experience || meta.experience || (isComp ? 'Empresa Contratante em Araucária' : 'Nenhuma registrada'),
+            phone: (isComp ? companyRow?.phone : null) || dbUser?.phone || meta.phone || '',
+            skills: Array.isArray(dbUser?.skills) ? dbUser.skills : (meta.skills || []),
+            favorites: [],
+            status: isAdminUser ? 'active' : (isPendingInDb ? 'pending' : 'active'),
+            accountType: isComp ? 'company' : 'candidate',
+            companyName: isComp ? (companyRow?.company_name || dbUser?.company_name || meta.company_name) : undefined,
+            cnpj: isComp ? (companyRow?.cnpj || dbUser?.cnpj || meta.cnpj) : undefined,
+            companySegment: isComp ? (companyRow?.segment || dbUser?.company_segment || meta.company_segment) : undefined,
+            companyNeighborhood: isComp ? (companyRow?.neighborhood || dbUser?.company_neighborhood || meta.company_neighborhood) : undefined,
+            responsibleName: isComp ? (companyRow?.responsible_name || dbUser?.responsible_name || meta.responsible_name) : undefined,
+            isAdmin: isAdminUser,
+            role: userRole,
+            cargo: userCargo,
+            is2FAEnabled: true
+          };
+
+          // App.tsx obrigatoriamente exige 2FA antes de liberar qualquer painel ou área logada
           if (onLoginSuccess) {
             onLoginSuccess(loggedUser);
           }
@@ -779,13 +838,17 @@ export default function AuthScreen({
 
         if (!isDuplicateRapidClick) {
           regDispatchLockRef.current = { email: cleanEmail, at: nowTs };
+          setRegDeliveryMethod('smtp');
           setRegEmailStatus({ sending: true });
           const mailResult = await sendActivationCodeEmail(cleanEmail, registrationCode, newUser.name);
           if (mailResult.delivered) {
+            setRegDeliveryMethod(mailResult.deliveryMethod || 'smtp');
             setRegEmailStatus({
               sending: false,
               delivered: true,
-              message: `Código de 6 dígitos enviado via oportunizahw@gmail.com para ${cleanEmail}.`
+              message:
+                mailResult.message ||
+                `Código de 6 dígitos enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${cleanEmail}.`
             });
             setSuccess(`Um código de 6 dígitos foi enviado para ${cleanEmail}. Digite-o abaixo para ativar sua conta.`);
           } else {
@@ -809,37 +872,18 @@ export default function AuthScreen({
     }
   };
 
-  async function sendActivationCodeEmail(targetEmail: string, codeToSend: string, targetName: string): Promise<{ ok: boolean; delivered: boolean; error?: string }> {
-    try {
-      const response = await fetch('/api/send-registration-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: targetEmail,
-          code: codeToSend,
-          userName: targetName
-        })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data?.delivered) {
-        return { ok: true, delivered: true };
-      }
-      if (response.ok) {
-        return { ok: true, delivered: false, error: 'Servidor de disparo de e-mail em modo contingência.' };
-      }
-      return {
-        ok: false,
-        delivered: false,
-        error: data?.details || data?.error || 'Não foi possível enviar o código por e-mail agora.'
-      };
-    } catch (err: any) {
-      console.warn('Falha ao conectar no servidor de e-mail:', err);
-      return {
-        ok: false,
-        delivered: false,
-        error: 'Não foi possível conectar ao serviço de envio de e-mail neste ambiente.'
-      };
-    }
+  async function sendActivationCodeEmail(
+    targetEmail: string,
+    codeToSend: string,
+    targetName: string
+  ) {
+    return await sendVerificationCodeEmail({
+      email: targetEmail,
+      code: codeToSend,
+      userName: targetName,
+      kind: 'registration',
+      accountType
+    });
   }
 
   async function upsertUserProfileSafely(fullPayload: Record<string, any>, fallbackPayload: Record<string, any>) {
@@ -880,21 +924,28 @@ export default function AuthScreen({
     setOauthSentCode(code);
     setOauthCodeInput('');
     setOauthTimer(60);
+    setOauthDeliveryMethod('smtp');
     setError(null);
     setSuccess(null);
     setOauthEmailStatus({ sending: true });
 
-    const res = await sendActivationCodeEmail(
-      cleanTargetEmail,
+    const res = await sendVerificationCodeEmail({
+      email: cleanTargetEmail,
       code,
-      targetUser.name || cleanTargetEmail.split('@')[0]
-    );
+      userName: targetUser.name || cleanTargetEmail.split('@')[0],
+      kind: 'login-2fa',
+      isAdmin: Boolean(targetUser.isAdmin),
+      accountType: targetUser.accountType
+    });
 
     if (res.delivered) {
+      setOauthDeliveryMethod(res.deliveryMethod || 'smtp');
       setOauthEmailStatus({
         sending: false,
         delivered: true,
-        message: `Código enviado via oportunizahw@gmail.com para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
+        message:
+          res.message ||
+          `Código enviado via ${res.providerLabel || 'oportunizahw@gmail.com'} para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
       });
     } else {
       setOauthEmailStatus({
@@ -972,16 +1023,20 @@ export default function AuthScreen({
     const newCode = Math.floor(100000 + Math.random() * 900000).toString();
     setSentRegCode(newCode);
     setRegTimer(60);
+    setRegDeliveryMethod('smtp');
     setError(null);
     setSuccess(null);
     setRegEmailStatus({ sending: true });
 
     const mailResult = await sendActivationCodeEmail(targetEmail, newCode, tempLoggedUser?.name || fullName || companyName || targetEmail.split('@')[0]);
     if (mailResult.delivered) {
+      setRegDeliveryMethod(mailResult.deliveryMethod || 'smtp');
       setRegEmailStatus({
         sending: false,
         delivered: true,
-        message: `Novo código enviado via oportunizahw@gmail.com para ${targetEmail}.`
+        message:
+          mailResult.message ||
+          `Novo código enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${targetEmail}.`
       });
       setSuccess(`Reenviamos um novo código de 6 dígitos para ${targetEmail}.`);
     } else {
@@ -993,7 +1048,7 @@ export default function AuthScreen({
     }
   };
 
-  const handleVerifyOAuthCode = (e: React.FormEvent) => {
+  const handleVerifyOAuthCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
@@ -1003,7 +1058,17 @@ export default function AuthScreen({
       setError('Digite os 6 dígitos do código de ativação enviado para o seu e-mail.');
       return;
     }
-    if (!oauthSentCode || entered !== oauthSentCode) {
+
+    if (oauthDeliveryMethod === 'supabase-otp') {
+      const targetEmail = (enforceVerificationUser?.email || email).trim().toLowerCase();
+      setLoading(true);
+      const otpCheck = await verifySupabaseOtpCode(targetEmail, entered);
+      setLoading(false);
+      if (!otpCheck.verified) {
+        setError('Código de ativação incorreto ou expirado. Confira o código recebido no seu e-mail.');
+        return;
+      }
+    } else if (!oauthSentCode || entered !== oauthSentCode) {
       setError('Código de ativação incorreto. Confira o código recebido no seu e-mail e tente novamente.');
       return;
     }
@@ -1153,6 +1218,7 @@ export default function AuthScreen({
       const fullPayload: Record<string, any> = {
         ...basePayload,
         status: 'active',
+        is_2fa_enabled: true,
         account_type: activatedUser.accountType,
         role: resolvedRole,
         cargo: resolvedCargo
@@ -1194,6 +1260,9 @@ export default function AuthScreen({
         localStorage.setItem('oportuniza-current-user', JSON.stringify(activatedUser));
         sessionStorage.removeItem('oportuniza-reg-in-progress');
       }
+
+      // Usuário acabou de verificar 2FA nesta ativação; marca sessão atual para não pedir 2x seguidas
+      markSession2FAVerified(userId, cleanTargetEmail);
 
       try {
         await supabase.auth.updateUser({
@@ -1237,7 +1306,7 @@ export default function AuthScreen({
       setSuccess('Conta ativada e informações salvas com sucesso! Entrando...');
       setTimeout(() => {
         if (onLoginSuccess) {
-          onLoginSuccess(activatedUser);
+          onLoginSuccess({ ...activatedUser, is2FAEnabled: true });
         }
       }, 700);
     } catch (err: any) {
@@ -1253,8 +1322,24 @@ export default function AuthScreen({
     setError(null);
     setSuccess(null);
 
+    const targetEmailCheck = (tempLoggedUser?.email || email).trim().toLowerCase();
     const enteredCode = regVerifyCodeInput.trim();
-    if (enteredCode.length !== 6 || !sentRegCode || enteredCode !== sentRegCode) {
+    if (enteredCode.length !== 6) {
+      setError('Digite todos os 6 dígitos do código enviado para seu e-mail.');
+      setLoading(false);
+      return;
+    }
+
+    let verifiedSessionUserId: string | undefined;
+    if (regDeliveryMethod === 'supabase-otp') {
+      const otpCheck = await verifySupabaseOtpCode(targetEmailCheck, enteredCode);
+      if (!otpCheck.verified) {
+        setError('Código de ativação incorreto ou expirado. Verifique o código enviado no seu e-mail.');
+        setLoading(false);
+        return;
+      }
+      verifiedSessionUserId = otpCheck.userId;
+    } else if (!sentRegCode || enteredCode !== sentRegCode) {
       setError('Código de ativação incorreto. Verifique o código enviado no seu e-mail.');
       setLoading(false);
       return;
@@ -1262,14 +1347,14 @@ export default function AuthScreen({
 
     const { data: { user: sessionUser } } = await supabase.auth.getUser();
 
-    if (!sessionUser && !tempLoggedUser) {
+    if (!sessionUser && !tempLoggedUser && !verifiedSessionUserId) {
       setError('Sessão expirada. Tente se cadastrar novamente.');
       setIsVerifyingReg(false);
       setLoading(false);
       return;
     }
 
-    const userId = sessionUser?.id || tempLoggedUser?.id || 'usr-' + Date.now();
+    const userId = sessionUser?.id || verifiedSessionUserId || tempLoggedUser?.id || 'usr-' + Date.now();
     const baseUser: AppUser = {
       ...(tempLoggedUser || {
         name: sessionUser?.user_metadata?.full_name || email.split('@')[0] || 'Usuário',
@@ -1304,6 +1389,7 @@ export default function AuthScreen({
       const fullPayload: Record<string, any> = {
         ...basePayload,
         status: 'active',
+        is_2fa_enabled: true,
         account_type: baseUser.accountType || 'candidate',
         role: baseUser.role || 'Candidato',
         cargo: baseUser.cargo || 'Estudante'
@@ -1367,78 +1453,19 @@ export default function AuthScreen({
         });
       } catch {}
 
+      // Cadastro acabou de validar e-mail em 2 etapas; libera entrada direta na sessão atual
+      markSession2FAVerified(userId, cleanFinalEmail);
       setSuccess('Conta ativada com sucesso! Bem-vindo ao Oportuniza.');
       
       setTimeout(() => {
         if (onLoginSuccess) {
-          onLoginSuccess(baseUser);
+          onLoginSuccess({ ...baseUser, is2FAEnabled: true });
         }
       }, 900);
     } catch (err: any) {
       setError('Erro ao finalizar cadastro: ' + (err.message || 'Tente novamente.'));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleVerifyLogin2FA = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    const entered = login2FACodeInput.trim();
-    if (entered.length !== 6 || !sentLogin2FACode || entered !== sentLogin2FACode) {
-      setError('Código de verificação incorreto. Verifique seu e-mail.');
-      setLoading(false);
-      return;
-    }
-
-    if (!pendingUser) {
-      setError('Sessão expirada. Faça login novamente.');
-      setIsVerifying2FA(false);
-      setLoading(false);
-      return;
-    }
-
-    setSuccess('Verificação concluída! Entrando...');
-    
-    setTimeout(() => {
-      if (onLoginSuccess) {
-        onLoginSuccess(pendingUser);
-      }
-    }, 900);
-  };
-
-  const triggerLogin2FA = async (userObj: AppUser) => {
-    setPendingUser(userObj);
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setSentLogin2FACode(code);
-    setLogin2FACodeInput('');
-    setIsVerifying2FA(true);
-    setError(null);
-    setSuccess(null);
-    setLoading(false);
-
-    try {
-      const res = await fetch('/api/send-2fa-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email: userObj.email, 
-          code: code,
-          userName: userObj.name
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.delivered) {
-        setSuccess(`Código de segurança enviado para ${userObj.email}.`);
-      } else {
-        setError('Não foi possível enviar o código 2FA por e-mail agora. Tente reenviar em instantes.');
-      }
-    } catch (err) {
-      console.warn("2FA email trigger warning:", err);
-      setError('Erro ao conectar com o servidor de e-mail para enviar o código 2FA.');
     }
   };
 
@@ -1555,11 +1582,17 @@ export default function AuthScreen({
 
                   <button
                     type="submit"
-                    disabled={oauthCodeInput.length < 6}
+                    disabled={loading || oauthCodeInput.length < 6}
                     className="w-full bg-[#52A8C7] hover:bg-[#3d90ad] text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-[#52A8C7]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                   >
-                    <span>Confirmar Código e Continuar</span>
-                    <ArrowRight className="w-4 h-4" />
+                    {loading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <span>Confirmar Código e Continuar</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </form>
 
@@ -2258,73 +2291,6 @@ export default function AuthScreen({
                       className="w-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold py-2 block hover:underline cursor-pointer"
                     >
                       Voltar e corrigir e-mail
-                    </button>
-                  </form>
-                </div>
-              ) : isVerifying2FA ? (
-                <div className="animate-fadeIn">
-                  <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-indigo-500/20">
-                    <ShieldCheckIcon className="w-8 h-8 text-indigo-500" />
-                  </div>
-
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Verificação de 2 Etapas</h2>
-                  <p className="text-gray-500 dark:text-slate-400 text-sm mb-6 leading-relaxed">
-                    Sua conta está protegida. Digite o código de 6 dígitos enviado para seu e-mail corporativo ou pessoal.
-                  </p>
-
-                  <form onSubmit={handleVerifyLogin2FA} className="space-y-4">
-                    {error && (
-                      <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/50 rounded-xl flex items-start gap-2.5 text-red-600 dark:text-red-400 text-xs font-medium animate-shake">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span>{error}</span>
-                      </div>
-                    )}
-                    {success && (
-                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 rounded-xl flex items-start gap-2.5 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
-                        <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span>{success}</span>
-                      </div>
-                    )}
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Código de Segurança</label>
-                      <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                          <KeyRound className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                        </div>
-                        <input 
-                          type="text"
-                          maxLength={6}
-                          placeholder="000000"
-                          value={login2FACodeInput}
-                          onChange={(e) => setLogin2FACodeInput(e.target.value.replace(/\D/g, ''))}
-                          className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-bold tracking-[0.2em] text-center"
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <button 
-                      type="submit"
-                      disabled={loading || login2FACodeInput.length < 6}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed group"
-                    >
-                      {loading ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <>
-                          <span>Verificar e Entrar</span>
-                          <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                        </>
-                      )}
-                    </button>
-                    
-                    <button 
-                      type="button"
-                      onClick={() => setIsVerifying2FA(false)}
-                      className="w-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold py-2 block hover:underline"
-                    >
-                      Voltar ao login
                     </button>
                   </form>
                 </div>

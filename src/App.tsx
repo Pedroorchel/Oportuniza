@@ -17,6 +17,7 @@ import UserAuthScreens from './components/UserAuthScreens';
 import AuthScreen from './components/AuthScreen';
 import AdminPanelScreen from './components/AdminPanelScreen';
 import Admin2FAScreen from './components/Admin2FAScreen';
+import TwoFactorAuthScreen from './components/TwoFactorAuthScreen';
 import CompanyDashboardScreen from './components/CompanyDashboardScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import JobsSection from './components/JobsSection';
@@ -35,6 +36,7 @@ import CoursePlayerScreen from './components/CoursePlayerScreen';
 import SettingsScreen from './components/SettingsScreen';
 import AtendimentoPanelScreen from './components/AtendimentoPanelScreen';
 import { resolveUserHierarchyTier } from './lib/hierarchyRoles';
+import { isSession2FAVerified, clearSession2FAVerification } from './lib/twoFactorSession';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('landing');
@@ -42,6 +44,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin2FAVerified, setIsAdmin2FAVerified] = useState(false);
+  const [isLogin2FAVerified, setIsLogin2FAVerified] = useState(false);
   const [activePerk, setActivePerk] = useState<string | null>(null);
   const [jobsVersion, setJobsVersion] = useState(0);
   const [blockedNotice, setBlockedNotice] = useState<{ email: string; name?: string; reason?: string } | null>(null);
@@ -361,16 +364,18 @@ export default function App() {
   useEffect(() => {
     if (user) {
       if (!user.isAdmin && user.status === 'pending') {
-        if (!['landing', 'bio', 'privacy', 'terms', 'register'].includes(currentScreen)) {
+        if (!['bio', 'privacy', 'terms', 'register'].includes(currentScreen)) {
           setCurrentScreen('register');
         }
         return;
       }
 
       const tier = resolveUserHierarchyTier(user);
-      if (tier.id === 'support_service' && (currentScreen === 'landing' || currentScreen === 'login' || currentScreen === 'register' || currentScreen === 'home')) {
+      if (user.isAdmin && ['landing', 'login', 'register', 'home'].includes(currentScreen)) {
+        setCurrentScreen('admin');
+      } else if (tier.id === 'support_service' && ['landing', 'login', 'register', 'home'].includes(currentScreen)) {
         setCurrentScreen('atendimento');
-      } else if (currentScreen === 'landing' || currentScreen === 'login' || currentScreen === 'register') {
+      } else if (['landing', 'login', 'register'].includes(currentScreen)) {
         setCurrentScreen('home');
       }
     }
@@ -384,6 +389,9 @@ export default function App() {
         const isBlocked = await isAccountBlocked({ id: user.id, email: user.email });
         if (isBlocked) {
           console.warn("Active user is blocked. Logging out immediately:", user.email);
+          clearSession2FAVerification();
+          setIsLogin2FAVerified(false);
+          setIsAdmin2FAVerified(false);
           await supabase.auth.signOut();
           setUser(null);
           setApplications([]);
@@ -451,6 +459,9 @@ export default function App() {
         const blocked = await isAccountBlocked({ id: userId, email: cleanEmail });
         if (blocked) {
           console.warn("Blocked user attempted login/session (Google or email):", cleanEmail, userId);
+          clearSession2FAVerification();
+          setIsLogin2FAVerified(false);
+          setIsAdmin2FAVerified(false);
           await supabase.auth.signOut();
           setUser(null);
           setApplications([]);
@@ -536,6 +547,9 @@ export default function App() {
               if (isBlocked) {
                 console.warn("Usuário bloqueado no banco tentou acessar:", cleanEmail);
                 const blockReason = extractBlockReasonFromRecord(data) || await fetchAccountBlockReason({ id: supabaseUser.id, email: cleanEmail });
+                clearSession2FAVerification();
+                setIsLogin2FAVerified(false);
+                setIsAdmin2FAVerified(false);
                 await supabase.auth.signOut();
                 setUser(null);
                 setApplications([]);
@@ -629,15 +643,21 @@ export default function App() {
                 updatedAt: data?.updated_at,
                 isAdmin: isAdminUser,
                 isBlocked: false,
+                is2FAEnabled: true,
                 status: isActivated ? 'active' : 'pending',
                 role: userRole,
                 cargo: userCargo
               };
 
+              const verifiedForSession = isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email);
+              setIsLogin2FAVerified(verifiedForSession);
+              setIsAdmin2FAVerified(isAdminUser ? verifiedForSession : false);
               setUser(dbLoadedUser);
               const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
               if (!isAdminUser && dbLoadedUser.status === 'pending') {
                 setCurrentScreen('register');
+              } else if (isAdminUser) {
+                setCurrentScreen('admin');
               } else if (loadedTier.id === 'support_service') {
                 setCurrentScreen('atendimento');
               }
@@ -653,6 +673,9 @@ export default function App() {
               if (isStillBlocked) {
                 console.warn("Blocked user attempted profile auto-creation:", cleanEmail);
                 const blockReason = await fetchAccountBlockReason({ id: supabaseUser.id, email: cleanEmail });
+                clearSession2FAVerification();
+                setIsLogin2FAVerified(false);
+                setIsAdmin2FAVerified(false);
                 await supabase.auth.signOut();
                 setUser(null);
                 setApplications([]);
@@ -714,11 +737,17 @@ export default function App() {
               const resolvedInitialUser: User = {
                 ...initialUser,
                 isAdmin: isAdminEmail,
+                is2FAEnabled: true,
                 status: isActivatedNew ? 'active' : 'pending'
               };
+              const verifiedForSession = isSession2FAVerified(resolvedInitialUser.id, resolvedInitialUser.email);
+              setIsLogin2FAVerified(verifiedForSession);
+              setIsAdmin2FAVerified(isAdminEmail ? verifiedForSession : false);
               setUser(resolvedInitialUser);
               if (!isAdminEmail && resolvedInitialUser.status === 'pending') {
                 setCurrentScreen('register');
+              } else if (isAdminEmail) {
+                setCurrentScreen('admin');
               }
             }
 
@@ -742,6 +771,8 @@ export default function App() {
 
       } else {
         // No session exists, clear everything to maintain strict isolation
+        setIsLogin2FAVerified(false);
+        setIsAdmin2FAVerified(false);
         setUser(null);
         setApplications([]);
         setEnrollments([]);
@@ -804,6 +835,7 @@ export default function App() {
   const handleSignOut = async () => {
     // 1. Clear all app specific storage immediately so UI state transitions with zero delay
     try {
+      clearSession2FAVerification();
       sessionStorage.removeItem('oportuniza-reg-in-progress');
       localStorage.removeItem('oportuniza-current-user');
       localStorage.removeItem('oportuniza-applications');
@@ -832,6 +864,7 @@ export default function App() {
     setCompletedCourses([]);
     setHistory([]);
     setIsAdmin2FAVerified(false);
+    setIsLogin2FAVerified(false);
     setCurrentScreen('landing');
 
     // 3. Sign out from Supabase Auth cleanly without blocking the UI
@@ -1420,6 +1453,25 @@ export default function App() {
     }
   };
 
+  const isPublicScreen = ['landing', 'bio', 'privacy', 'terms'].includes(currentScreen);
+  const isAdminSession = Boolean(user?.isAdmin);
+  const isCompanyAccount = Boolean(
+    user &&
+    (user.accountType === 'company' ||
+      user.role?.toLowerCase() === 'empresa' ||
+      user.cargo?.toLowerCase() === 'empresa')
+  );
+  const isPendingVerification = Boolean(user && !isAdminSession && user.status === 'pending');
+  const requiresAdmin2FA = Boolean(
+    user && !isPendingVerification && (isAdminSession || currentScreen === 'admin') && !isAdmin2FAVerified
+  );
+  const requiresUser2FA = Boolean(
+    user && !isPendingVerification && !isAdminSession && currentScreen !== 'admin' && !isLogin2FAVerified
+  );
+  const isWorkspaceUnlocked = Boolean(
+    user && !isPendingVerification && !requiresAdmin2FA && !requiresUser2FA
+  );
+
   return (
     <div className="device-frame">
       {isInitializing && (
@@ -1430,17 +1482,19 @@ export default function App() {
       )}
       <div className="app-container relative bg-[var(--bg-light)] select-none text-[var(--text-main)]">
         
-        {/* Drawer Sidebar */}
-        <SidebarComponent
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          currentScreen={currentScreen}
-          onNavigate={handleScreenNavigation}
-          unreadCount={unreadMessages}
-          user={user}
-          onSignOut={handleSignOut}
-          applicationsCount={applications.length}
-        />
+        {/* Drawer Sidebar (only after mandatory 2FA passes) */}
+        {isWorkspaceUnlocked && (
+          <SidebarComponent
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            currentScreen={currentScreen}
+            onNavigate={handleScreenNavigation}
+            unreadCount={unreadMessages}
+            user={user}
+            onSignOut={handleSignOut}
+            applicationsCount={applications.length}
+          />
+        )}
 
         {/* Main Core Router */}
         <div className="w-full h-full relative">
@@ -1460,14 +1514,6 @@ export default function App() {
             <BioScreen onNavigate={handleScreenNavigation} />
           )}
 
-          {/* Change Password Screen */}
-          {currentScreen === 'change-password' && (
-            <ChangePasswordScreen 
-              user={user}
-              onBack={() => handleGoBack('settings')} 
-            />
-          )}
-
           {/* Privacy Policy Screen */}
           {currentScreen === 'privacy' && (
             <PrivacyPolicyScreen onBack={() => handleGoBack('settings')} />
@@ -1479,20 +1525,36 @@ export default function App() {
           )}
 
           {/* Auth Screens */}
-          {!user && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (
+          {!user && !isPublicScreen && (
             <AuthScreen 
               onNavigate={handleScreenNavigation}
               defaultIsLogin={currentScreen !== 'register'}
               onLoginSuccess={(loggedInUser) => {
-                setUser({ ...loggedInUser, status: 'active' });
-                const tier = resolveUserHierarchyTier(loggedInUser);
-                if (tier.id === 'support_service') {
+                const nextUser: User = {
+                  ...loggedInUser,
+                  status: loggedInUser.status === 'pending' ? 'pending' : 'active',
+                  is2FAEnabled: true
+                };
+                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email);
+                setIsLogin2FAVerified(verifiedNow);
+                setIsAdmin2FAVerified(nextUser.isAdmin ? verifiedNow : false);
+                setUser(nextUser);
+
+                const tier = resolveUserHierarchyTier(nextUser);
+                if (nextUser.isAdmin) {
+                  setCurrentScreen('admin');
+                } else if (nextUser.status === 'pending') {
+                  setCurrentScreen('register');
+                } else if (tier.id === 'support_service') {
                   setCurrentScreen('atendimento');
                 } else {
                   setCurrentScreen('home');
                 }
               }}
               onAdminLoginSuccess={(adminUser) => {
+                const verifiedNow = isSession2FAVerified(adminUser.id, adminUser.email);
+                setIsLogin2FAVerified(false);
+                setIsAdmin2FAVerified(verifiedNow);
                 setUser(adminUser);
                 setCurrentScreen('admin');
               }}
@@ -1500,7 +1562,7 @@ export default function App() {
           )}
 
           {/* Mandatory 2FA Activation + Profile Completion for new Google/OAuth or pending accounts */}
-          {user && !user.isAdmin && user.status === 'pending' && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (
+          {user && isPendingVerification && !isPublicScreen && (
             <AuthScreen 
               enforceVerificationUser={user}
               onNavigate={(screen) => {
@@ -1512,9 +1574,16 @@ export default function App() {
               }}
               onSignOut={handleSignOut}
               onLoginSuccess={(loggedInUser) => {
-                setUser({ ...loggedInUser, status: 'active' });
-                const tier = resolveUserHierarchyTier(loggedInUser);
-                if (tier.id === 'support_service') {
+                const nextUser: User = { ...loggedInUser, status: 'active', is2FAEnabled: true };
+                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email);
+                setIsLogin2FAVerified(verifiedNow);
+                setIsAdmin2FAVerified(nextUser.isAdmin ? verifiedNow : false);
+                setUser(nextUser);
+
+                const tier = resolveUserHierarchyTier(nextUser);
+                if (nextUser.isAdmin) {
+                  setCurrentScreen('admin');
+                } else if (tier.id === 'support_service') {
                   setCurrentScreen('atendimento');
                 } else {
                   setCurrentScreen('home');
@@ -1523,8 +1592,19 @@ export default function App() {
             />
           )}
 
-          {/* Admin Panel (Guarded by 2FA) */}
-          {user && (user.isAdmin || currentScreen === 'admin') && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (
+          {/* Mandatory Universal 2FA Gate for ALL Non-Admin Active Users (Candidate, Company, Atendimento, E-mail, Google, GitHub) */}
+          {user && requiresUser2FA && !isPublicScreen && (
+            <ErrorBoundary fallbackTitle="Erro ao carregar a Verificação em Duas Etapas">
+              <TwoFactorAuthScreen
+                user={user}
+                onVerified={() => setIsLogin2FAVerified(true)}
+                onCancel={handleSignOut}
+              />
+            </ErrorBoundary>
+          )}
+
+          {/* Admin Panel (Guarded by Mandatory 2FA) */}
+          {user && !isPendingVerification && (isAdminSession || currentScreen === 'admin') && !isPublicScreen && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel Administrativo">
               {!isAdmin2FAVerified ? (
                 <Admin2FAScreen
@@ -1541,8 +1621,8 @@ export default function App() {
             </ErrorBoundary>
           )}
 
-          {/* Company Dashboard (Exclusive Company / RH Workspace) */}
-          {user && !user.isAdmin && user.status !== 'pending' && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (user.accountType === 'company' || user.role?.toLowerCase() === 'empresa' || user.cargo?.toLowerCase() === 'empresa') && (
+          {/* Company Dashboard (Exclusive Company / RH Workspace - Protected by Mandatory 2FA) */}
+          {isWorkspaceUnlocked && !isAdminSession && !isPublicScreen && currentScreen !== 'admin' && isCompanyAccount && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel da Empresa">
               <CompanyDashboardScreen
                 user={user}
@@ -1552,8 +1632,8 @@ export default function App() {
             </ErrorBoundary>
           )}
 
-          {/* Main App (Protected Student View) */}
-          {user && !user.isAdmin && user.status !== 'pending' && !(user.accountType === 'company' || user.role?.toLowerCase() === 'empresa' || user.cargo?.toLowerCase() === 'empresa') && currentScreen !== 'admin' && (
+          {/* Main App (Protected Candidate / Support Workspace - Protected by Mandatory 2FA) */}
+          {isWorkspaceUnlocked && !isAdminSession && !isCompanyAccount && currentScreen !== 'admin' && (
             <>
               {/* Home */}
               {currentScreen === 'home' && (
@@ -2496,6 +2576,7 @@ export default function App() {
 
           {currentScreen === 'change-password' && (
             <ChangePasswordScreen
+              user={user}
               onBack={() => handleGoBack('settings')}
             />
           )}

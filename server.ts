@@ -14,6 +14,86 @@ const PORT = 3000;
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// CORS support for /api/* routes (allows external static frontend via VITE_API_BASE_URL)
+app.use("/api", (req: any, res: any, next: any) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, apikey");
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  next();
+});
+
+app.get("/api/health", (_req: any, res: any) => {
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || "oportunizahw@gmail.com";
+  const smtpPass = (process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD || "vuwlotawwkbrwdhj").replace(/\s+/g, '');
+  return res.json({
+    ok: true,
+    smtpConfigured: Boolean(smtpUser && smtpPass),
+    timestamp: new Date().toISOString()
+  });
+});
+
+async function sendSmtpMail(options: {
+  fromLabel: string;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<{ delivered: boolean; smtpUser: string }> {
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || "oportunizahw@gmail.com";
+  const smtpPass = (process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD || "vuwlotawwkbrwdhj").replace(/\s+/g, '');
+  const smtpHost = process.env.SMTP_HOST || "smtp.gmail.com";
+  const primaryPort = Number(process.env.SMTP_PORT || 465);
+
+  if (!smtpUser || !smtpPass) {
+    return { delivered: false, smtpUser: "" };
+  }
+
+  const attempts = primaryPort === 465
+    ? [
+        { port: 465, secure: true },
+        { port: 587, secure: false, requireTLS: true }
+      ]
+    : [
+        { port: primaryPort, secure: primaryPort === 465 },
+        { port: 465, secure: true }
+      ];
+
+  let lastError: any = null;
+  for (const cfg of attempts) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: cfg.port,
+        secure: cfg.secure,
+        requireTLS: (cfg as any).requireTLS,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      await transporter.sendMail({
+        from: `"${options.fromLabel}" <${smtpUser}>`,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+      });
+
+      return { delivered: true, smtpUser };
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`SMTP attempt on port ${cfg.port} failed for ${options.to}:`, err?.message || err);
+    }
+  }
+
+  throw lastError || new Error("Falha ao conectar ao servidor SMTP.");
+}
+
 // Helper to call generateContent with retry capability for transient errors (like 503 or 429)
 async function generateContentWithRetry(
   aiInstance: GoogleGenAI,
@@ -186,14 +266,17 @@ app.post("/api/mentor", async (req: any, res: any) => {
 
 // Endpoint to send 2FA verification email to Gmail / external address
 app.post("/api/send-2fa-email", async (req: any, res: any) => {
-  const { email, code, userName } = req.body;
+  const { email, code, userName, isAdmin, accountType } = req.body;
 
   if (!email || !code) {
     return res.status(400).json({ error: "E-mail e código 2FA são obrigatórios" });
   }
 
-  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || "oportunizahw@gmail.com";
-  const smtpPass = (process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD || "vuwlotawwkbrwdhj").replace(/\s+/g, '');
+  const accessTarget = isAdmin
+    ? "ao <strong>Painel de Administração</strong>"
+    : accountType === "company"
+    ? "ao <strong>Painel da Empresa</strong> no Oportuniza Araucária"
+    : "à sua conta no <strong>Oportuniza Araucária</strong>";
 
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #0f172a; color: #f8fafc; border-radius: 16px; border: 1px solid #1e293b;">
@@ -203,11 +286,11 @@ app.post("/api/send-2fa-email", async (req: any, res: any) => {
       </div>
       <div style="background-color: #1e293b; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 24px; border: 1px solid #334155;">
         <h2 style="color: #ffffff; font-size: 18px; margin-top: 0;">Código de Verificação de 2 Etapas (2FA)</h2>
-        <p style="color: #cbd5e1; font-size: 14px;">Olá, <strong>${userName || 'Administrador'}</strong>. Digite o código abaixo no portal para liberar seu acesso ao Painel de Administração:</p>
+        <p style="color: #cbd5e1; font-size: 14px;">Olá, <strong>${userName || 'Usuário'}</strong>. Digite o código abaixo no portal para confirmar seu login e liberar seu acesso ${accessTarget}:</p>
         <div style="background-color: #0284c7; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 8px; padding: 16px 24px; border-radius: 8px; display: inline-block; margin: 16px 0; font-family: monospace;">
           ${code}
         </div>
-        <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">Este código é válido por 10 minutos. Se você não solicitou o acesso, desconsidere este e-mail.</p>
+        <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">Este código é válido por 10 minutos. Se você não tentou entrar agora, desconsidere este e-mail.</p>
       </div>
       <div style="text-align: center; color: #64748b; font-size: 12px;">
         &copy; ${new Date().getFullYear()} Prefeitura Municipal de Araucária / Oportuniza
@@ -216,41 +299,30 @@ app.post("/api/send-2fa-email", async (req: any, res: any) => {
   `;
 
   try {
-    if (smtpUser && smtpPass) {
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || "smtp.gmail.com",
-        port: Number(process.env.SMTP_PORT || 465),
-        secure: true,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
+    const result = await sendSmtpMail({
+      fromLabel: "Oportuniza Araucária - Segurança",
+      to: email,
+      subject: `[Oportuniza] Código de Verificação 2FA: ${code}`,
+      html: htmlContent,
+    });
 
-      await transporter.sendMail({
-        from: `"Oportuniza Araucária - Segurança" <${smtpUser}>`,
-        to: email,
-        subject: `[Oportuniza] Código de Verificação 2FA: ${code}`,
-        html: htmlContent,
-      });
-
-      console.log(`2FA email dispatched via SMTP (${smtpUser}) to ${email}`);
-      return res.json({ success: true, delivered: true, message: `E-mail de 2FA enviado com sucesso via ${smtpUser} para ${email}` });
+    if (result.delivered) {
+      console.log(`2FA email dispatched via SMTP (${result.smtpUser}) to ${email}`);
+      return res.json({ success: true, delivered: true, message: `E-mail de 2FA enviado com sucesso via ${result.smtpUser} para ${email}` });
     } else {
       console.log(`2FA Code generated for ${email}: ${code} (SMTP not set in env)`);
       return res.json({
         success: true,
         delivered: false,
         simulated: true,
-        message: `Código 2FA (${code}) gerado para ${email}.`,
+        message: `Serviço SMTP não configurado no servidor.`
       });
     }
   } catch (err: any) {
     console.error("Error sending 2FA email:", err);
     return res.status(500).json({
-      error: "Falha ao enviar e-mail",
-      details: err.message,
-      simulatedCode: code
+      error: "Falha ao enviar e-mail de verificação 2FA.",
+      details: err.message
     });
   }
 });
@@ -263,14 +335,11 @@ app.post("/api/send-registration-email", async (req: any, res: any) => {
     return res.status(400).json({ error: "E-mail e código de ativação são obrigatórios" });
   }
 
-  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || "oportunizahw@gmail.com";
-  const smtpPass = (process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD || "vuwlotawwkbrwdhj").replace(/\s+/g, '');
-
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #0f172a; color: #f8fafc; border-radius: 16px; border: 1px solid #1e293b;">
       <div style="text-align: center; margin-bottom: 24px;">
         <h1 style="color: #06b6d4; font-size: 24px; font-weight: bold; margin: 0;">Oportuniza Araucária</h1>
-        <p style="color: #94a3b8; font-size: 14px; margin-top: 4px;">Ativação de Nova Conta</p>
+        <p style="color: #94a3b8; font-size: 14px; margin-top: 4px;">Ativação de Nova Conta (2FA)</p>
       </div>
       <div style="background-color: #1e293b; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 24px; border: 1px solid #334155;">
         <h2 style="color: #ffffff; font-size: 18px; margin-top: 0;">Seu Código de Ativação</h2>
@@ -287,25 +356,18 @@ app.post("/api/send-registration-email", async (req: any, res: any) => {
   `;
 
   try {
-    if (smtpUser && smtpPass) {
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || "smtp.gmail.com",
-        port: Number(process.env.SMTP_PORT || 465),
-        secure: true,
-        auth: { user: smtpUser, pass: smtpPass },
-      });
+    const result = await sendSmtpMail({
+      fromLabel: "Oportuniza Araucária - Boas-vindas",
+      to: email,
+      subject: `[Oportuniza] Seu Código de Ativação: ${code}`,
+      html: htmlContent,
+    });
 
-      await transporter.sendMail({
-        from: `"Oportuniza Araucária - Boas-vindas" <${smtpUser}>`,
-        to: email,
-        subject: `[Oportuniza] Seu Código de Ativação: ${code}`,
-        html: htmlContent,
-      });
-
+    if (result.delivered) {
       console.log(`Registration email sent to ${email}`);
-      return res.json({ success: true, delivered: true });
+      return res.json({ success: true, delivered: true, message: `Código enviado via ${result.smtpUser} para ${email}` });
     } else {
-      return res.json({ success: true, delivered: false, code });
+      return res.json({ success: true, delivered: false });
     }
   } catch (err: any) {
     console.error("Error sending registration email:", err);
@@ -322,8 +384,6 @@ app.post("/api/send-password-recovery-email", async (req: any, res: any) => {
   }
 
   const recoveryCode = code || Math.floor(100000 + Math.random() * 900000).toString();
-  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || "oportunizahw@gmail.com";
-  const smtpPass = (process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD || "vuwlotawwkbrwdhj").replace(/\s+/g, '');
 
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #0f172a; color: #f8fafc; border-radius: 16px; border: 1px solid #1e293b;">
@@ -346,41 +406,30 @@ app.post("/api/send-password-recovery-email", async (req: any, res: any) => {
   `;
 
   try {
-    if (smtpUser && smtpPass) {
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || "smtp.gmail.com",
-        port: Number(process.env.SMTP_PORT || 465),
-        secure: true,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
+    const result = await sendSmtpMail({
+      fromLabel: "Oportuniza Araucária - Suporte",
+      to: email,
+      subject: `[Oportuniza] Código para Redefinição de Senha: ${recoveryCode}`,
+      html: htmlContent,
+    });
 
-      await transporter.sendMail({
-        from: `"Oportuniza Araucária - Suporte" <${smtpUser}>`,
-        to: email,
-        subject: `[Oportuniza] Código para Redefinição de Senha: ${recoveryCode}`,
-        html: htmlContent,
-      });
-
-      console.log(`Password recovery email dispatched via ${smtpUser} to ${email}`);
-      return res.json({ success: true, delivered: true, code: recoveryCode, message: `E-mail de recuperação enviado com sucesso via ${smtpUser} para ${email}!` });
+    if (result.delivered) {
+      console.log(`Password recovery email dispatched via ${result.smtpUser} to ${email}`);
+      return res.json({ success: true, delivered: true, code: recoveryCode, message: `E-mail de recuperação enviado com sucesso via ${result.smtpUser} para ${email}!` });
     } else {
       return res.json({
         success: true,
         delivered: false,
         simulated: true,
         code: recoveryCode,
-        message: `Código de recuperação (${recoveryCode}) gerado para ${email}.`,
+        message: `Serviço SMTP não configurado no servidor.`,
       });
     }
   } catch (err: any) {
     console.error("Error sending password recovery email:", err);
     return res.status(500).json({
       error: "Falha ao enviar e-mail de recuperação",
-      details: err.message,
-      code: recoveryCode
+      details: err.message
     });
   }
 });
