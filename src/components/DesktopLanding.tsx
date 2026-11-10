@@ -29,9 +29,13 @@ import {
   Lock, 
   Lightbulb,
   BrainCircuit,
-  X
+  X,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { ScreenId } from '../types';
+import { useTheme } from '../lib/theme';
+import { resolveAssetUrl } from '../lib/assets';
 
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
@@ -211,7 +215,7 @@ function VacancyMarqueeCard({
     >
       <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl overflow-hidden bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 shadow-md group-hover:scale-105 transition-transform shrink-0 p-1 flex items-center justify-center ring-4 ring-black/5 dark:ring-white/5">
         <img 
-          src={partner.logoImg} 
+          src={resolveAssetUrl(partner.logoImg)} 
           alt={partner.name} 
           className="w-full h-full object-contain rounded-xl"
           loading="lazy"
@@ -250,6 +254,7 @@ interface DesktopLandingProps {
 }
 
 export default function DesktopLanding({ onNavigate }: DesktopLandingProps) {
+  const [theme, toggleTheme] = useTheme();
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   // FAQ Category Filter
@@ -344,7 +349,21 @@ export default function DesktopLanding({ onNavigate }: DesktopLandingProps) {
           </nav>
 
           {/* User Auth CTAs */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2.5 rounded-xl bg-slate-100/90 dark:bg-slate-800/90 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 transition-all cursor-pointer flex items-center justify-center shadow-2xs"
+              title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+              aria-label={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-sky-600" />
+              )}
+            </button>
+
             <button
               onClick={() => onNavigate('login')}
               className="px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-primary rounded-xl transition-all cursor-pointer hover:bg-slate-100/70 dark:hover:bg-slate-800/70"

@@ -5,8 +5,8 @@ import { mockJobs, mockCourses, loadJobsFromSupabase, loadCoursesFromSupabase } 
 import { supabase } from './lib/supabaseClient';
 import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from './lib/blockedAccounts';
 import { toast } from './lib/toast';
-import { useTheme } from './lib/theme';
 import ToastContainer from './components/ToastContainer';
+import { isImageAssetUrl, resolveAssetUrl } from './lib/assets';
 
 // Import our modular subcomponents
 import SidebarComponent from './components/Sidebar';
@@ -45,7 +45,6 @@ export default function App() {
   const [activePerk, setActivePerk] = useState<string | null>(null);
   const [jobsVersion, setJobsVersion] = useState(0);
   const [blockedNotice, setBlockedNotice] = useState<{ email: string; name?: string; reason?: string } | null>(null);
-  const [, toggleDarkMode] = useTheme();
 
   useEffect(() => {
     if (user?.email) {
@@ -361,6 +360,13 @@ export default function App() {
 
   useEffect(() => {
     if (user) {
+      if (!user.isAdmin && user.status === 'pending') {
+        if (!['landing', 'bio', 'privacy', 'terms', 'register'].includes(currentScreen)) {
+          setCurrentScreen('register');
+        }
+        return;
+      }
+
       const tier = resolveUserHierarchyTier(user);
       if (tier.id === 'support_service' && (currentScreen === 'landing' || currentScreen === 'login' || currentScreen === 'register' || currentScreen === 'home')) {
         setCurrentScreen('atendimento');
@@ -407,10 +413,14 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    const initFailsafe = setTimeout(() => {
+      setIsInitializing(false);
+    }, 4000);
+
     // Supabase Auth Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // If the event is USER_UPDATED, it might have been triggered by our proprio handleSaveProfile.
-      if (event === 'USER_UPDATED' && user) {
+      // Skip profile re-fetch on USER_UPDATED events to avoid race conditions with active saves
+      if (event === 'USER_UPDATED') {
         console.log("Auth event: USER_UPDATED. Skipping full profile re-fetch to avoid race conditions.");
         return;
       }
@@ -428,6 +438,14 @@ export default function App() {
         const supabaseUser = session.user;
         const cleanEmail = (supabaseUser.email || '').trim().toLowerCase();
         const userId = supabaseUser.id;
+        const authProvider = String(supabaseUser.app_metadata?.provider || 'email').toLowerCase();
+        const isOAuthSession = authProvider !== '' && authProvider !== 'email';
+
+        // Avoid interrupting an active email+password 6-digit registration code verification in AuthScreen
+        if (typeof window !== 'undefined' && cleanEmail && sessionStorage.getItem('oportuniza-reg-in-progress') === cleanEmail) {
+          setIsInitializing(false);
+          return;
+        }
 
         // 1. CRITICAL GATEKEEPER: Check if user/email is blocked BEFORE setting user state or DB upserts
         const blocked = await isAccountBlocked({ id: userId, email: cleanEmail });
@@ -451,6 +469,8 @@ export default function App() {
         const rawType = String(supabaseUser.user_metadata?.account_type || supabaseUser.user_metadata?.accountType || '').toLowerCase();
         const rawRole = String(supabaseUser.user_metadata?.role || supabaseUser.user_metadata?.cargo || '').toLowerCase();
         const isCompMeta = rawType === 'company' || rawRole === 'empresa';
+        const isActivatedLocally = typeof window !== 'undefined' && cleanEmail ? localStorage.getItem(`oportuniza-activated-${cleanEmail}`) === 'true' : false;
+        const isActivatedInMeta = supabaseUser.user_metadata?.account_activated === true && supabaseUser.user_metadata?.profile_completed === true;
 
         const initialUser: User = {
           id: supabaseUser.id,
@@ -554,6 +574,29 @@ export default function App() {
                 isCompanyAccount = true;
               }
 
+              const dbExplicitPending = String(data?.status || '').toLowerCase() === 'pending';
+              const hasCompletedProfileInDb = Boolean(
+                data &&
+                String(data.status || '').toLowerCase() === 'active' &&
+                (
+                  String(data.phone || '').replace(/\D/g, '').length >= 8 ||
+                  Boolean(String(data.bio || '').trim()) ||
+                  Boolean(String(data.company_name || '').trim()) ||
+                  Boolean(String(data.cnpj || '').trim())
+                )
+              );
+
+              const isActivated = Boolean(
+                isAdminUser ||
+                isActivatedInMeta ||
+                isActivatedLocally ||
+                (!dbExplicitPending && (
+                  isOAuthSession
+                    ? (hasCompletedProfileInDb || Boolean(companyData && String(companyData.status || '').toLowerCase() === 'active'))
+                    : (supabaseUser.user_metadata?.requires_activation !== true || hasCompletedProfileInDb)
+                ))
+              );
+
               const rawDbRole = data?.role || data?.cargo;
               const userRole = rawDbRole || (isAdminUser ? 'Administrador' : (isCompanyAccount ? 'Empresa' : 'Candidato'));
               const userCargo = data?.cargo || rawDbRole || (isAdminUser ? 'Administrador' : (isCompanyAccount ? 'Empresa' : 'Estudante'));
@@ -586,19 +629,17 @@ export default function App() {
                 updatedAt: data?.updated_at,
                 isAdmin: isAdminUser,
                 isBlocked: false,
-                status: 'active',
+                status: isActivated ? 'active' : 'pending',
                 role: userRole,
                 cargo: userCargo
               };
 
               setUser(dbLoadedUser);
               const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
-              if (loadedTier.id === 'support_service') {
+              if (!isAdminUser && dbLoadedUser.status === 'pending') {
+                setCurrentScreen('register');
+              } else if (loadedTier.id === 'support_service') {
                 setCurrentScreen('atendimento');
-              } else if (dbLoadedUser.status === 'pending') {
-                 // Force verification flow
-                 setCurrentScreen('register');
-                 toast.info('Por favor, verifique sua conta para continuar.');
               }
               try {
                 localStorage.setItem('oportuniza-current-user', JSON.stringify(dbLoadedUser));
@@ -627,26 +668,58 @@ export default function App() {
                 return;
               }
 
-              // Create default row in the 'users' table ONLY if user is verified NOT blocked
+              const isAdminEmail = cleanEmail === 'oportunizahw@gmail.com';
+              const isActivatedNew = Boolean(
+                isAdminEmail ||
+                isActivatedInMeta ||
+                isActivatedLocally ||
+                (!isOAuthSession && supabaseUser.user_metadata?.requires_activation !== true)
+              );
+
+              // Create default row in the 'users' table ONLY if user is verified NOT blocked (fallback safely if status column does not exist yet)
               try {
-                await supabase
+                const { error: upsertErr1 } = await supabase
                   .from('users')
                   .upsert({
                     id: supabaseUser.id,
                     name: initialUser.name,
                     email: initialUser.email,
                     avatar_url: initialUser.avatarUrl,
-                    education: 'Ensino Médio em andamento',
-                    experience: 'Nenhuma registrada',
+                    education: isActivatedNew ? 'Ensino Médio em andamento' : '',
+                    experience: isActivatedNew ? 'Nenhuma registrada' : '',
                     phone: '',
                     skills: [],
-                    status: 'pending' // Force verification for new OAuth users
+                    status: isActivatedNew ? 'active' : 'pending'
                   }, { onConflict: 'id' });
+
+                if (upsertErr1 && (upsertErr1.code === 'PGRST204' || (upsertErr1 as any).code === '42703' || upsertErr1.message?.includes('column'))) {
+                  await supabase
+                    .from('users')
+                    .upsert({
+                      id: supabaseUser.id,
+                      name: initialUser.name,
+                      email: initialUser.email,
+                      avatar_url: initialUser.avatarUrl,
+                      education: isActivatedNew ? 'Ensino Médio em andamento' : '',
+                      experience: isActivatedNew ? 'Nenhuma registrada' : '',
+                      phone: '',
+                      skills: []
+                    }, { onConflict: 'id' });
+                }
                 console.log("Profile created successfully in database for:", initialUser.email);
               } catch (upsertErr) {
                 console.error("Failed to auto-upsert user on session change:", upsertErr);
               }
-              setUser(initialUser);
+
+              const resolvedInitialUser: User = {
+                ...initialUser,
+                isAdmin: isAdminEmail,
+                status: isActivatedNew ? 'active' : 'pending'
+              };
+              setUser(resolvedInitialUser);
+              if (!isAdminEmail && resolvedInitialUser.status === 'pending') {
+                setCurrentScreen('register');
+              }
             }
 
             setFavorites(prev => (prev.length > 0 ? prev : []));
@@ -675,17 +748,20 @@ export default function App() {
         setFavorites([]);
         setCompletedCourses([]);
         
-        localStorage.removeItem('oportuniza-current-user');
-        localStorage.removeItem('oportuniza-applications');
-        localStorage.removeItem('oportuniza-enrollments');
-        localStorage.removeItem('oportuniza-favorites');
-        localStorage.removeItem('oportuniza-courses-progress');
+        try {
+          localStorage.removeItem('oportuniza-current-user');
+          localStorage.removeItem('oportuniza-applications');
+          localStorage.removeItem('oportuniza-enrollments');
+          localStorage.removeItem('oportuniza-favorites');
+          localStorage.removeItem('oportuniza-courses-progress');
+        } catch (e) {}
         
         setIsInitializing(false);
       }
     });
 
     return () => {
+      clearTimeout(initFailsafe);
       subscription.unsubscribe();
     };
   }, []);
@@ -726,14 +802,9 @@ export default function App() {
   }, []);
 
   const handleSignOut = async () => {
+    // 1. Clear all app specific storage immediately so UI state transitions with zero delay
     try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.error("Logout error:", err);
-    }
-    
-    // Clear all app specific local storage for protection and isolation
-    try {
+      sessionStorage.removeItem('oportuniza-reg-in-progress');
       localStorage.removeItem('oportuniza-current-user');
       localStorage.removeItem('oportuniza-applications');
       localStorage.removeItem('oportuniza-enrollments');
@@ -753,7 +824,7 @@ export default function App() {
       console.warn("Error cleaning storage during logout:", e);
     }
     
-    // Reset all isolated state
+    // 2. Reset all isolated React state immediately
     setUser(null);
     setApplications([]);
     setEnrollments([]);
@@ -762,6 +833,13 @@ export default function App() {
     setHistory([]);
     setIsAdmin2FAVerified(false);
     setCurrentScreen('landing');
+
+    // 3. Sign out from Supabase Auth cleanly without blocking the UI
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
   };
 
   const handleApply = async (job: Job, cvInfo?: { link?: string, fileName?: string }): Promise<boolean> => {
@@ -1247,6 +1325,7 @@ export default function App() {
   };
 
   const handleDeleteAllData = async () => {
+    const emailToClear = user?.email?.trim().toLowerCase();
     if (user?.id) {
       try {
         await supabase
@@ -1256,6 +1335,12 @@ export default function App() {
       } catch (err) {
         console.error("Error deleting user from database:", err);
       }
+    }
+
+    if (emailToClear) {
+      try {
+        localStorage.removeItem(`oportuniza-activated-${emailToClear}`);
+      } catch (e) {}
     }
 
     await handleSignOut();
@@ -1338,7 +1423,7 @@ export default function App() {
   return (
     <div className="device-frame">
       {isInitializing && (
-        <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm rounded-[44px]">
+        <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm">
           <div className="w-12 h-12 border-4 border-[#52A8C7]/20 border-t-[#52A8C7] rounded-full animate-spin mb-4" />
           <p className="text-xs font-bold text-gray-400 animate-pulse tracking-widest uppercase">Sincronizando...</p>
         </div>
@@ -1399,8 +1484,13 @@ export default function App() {
               onNavigate={handleScreenNavigation}
               defaultIsLogin={currentScreen !== 'register'}
               onLoginSuccess={(loggedInUser) => {
-                setUser(loggedInUser);
-                setCurrentScreen('home');
+                setUser({ ...loggedInUser, status: 'active' });
+                const tier = resolveUserHierarchyTier(loggedInUser);
+                if (tier.id === 'support_service') {
+                  setCurrentScreen('atendimento');
+                } else {
+                  setCurrentScreen('home');
+                }
               }}
               onAdminLoginSuccess={(adminUser) => {
                 setUser(adminUser);
@@ -1408,29 +1498,39 @@ export default function App() {
               }}
             />
           )}
-          {/* Handle pending Google users verification */}
-          {user && user.status === 'pending' && (
-             <AuthScreen 
-               enforceVerificationForEmail={user.email}
-               onNavigate={handleScreenNavigation}
-               onLoginSuccess={(loggedInUser) => {
-                 setUser(loggedInUser);
-                 setCurrentScreen('home');
-               }}
-             />
+
+          {/* Mandatory 2FA Activation + Profile Completion for new Google/OAuth or pending accounts */}
+          {user && !user.isAdmin && user.status === 'pending' && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (
+            <AuthScreen 
+              enforceVerificationUser={user}
+              onNavigate={(screen) => {
+                if (screen === 'landing' || screen === 'login') {
+                  handleSignOut();
+                } else {
+                  handleScreenNavigation(screen);
+                }
+              }}
+              onSignOut={handleSignOut}
+              onLoginSuccess={(loggedInUser) => {
+                setUser({ ...loggedInUser, status: 'active' });
+                const tier = resolveUserHierarchyTier(loggedInUser);
+                if (tier.id === 'support_service') {
+                  setCurrentScreen('atendimento');
+                } else {
+                  setCurrentScreen('home');
+                }
+              }}
+            />
           )}
 
           {/* Admin Panel (Guarded by 2FA) */}
-          {user && (user.isAdmin || currentScreen === 'admin') && (
+          {user && (user.isAdmin || currentScreen === 'admin') && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel Administrativo">
               {!isAdmin2FAVerified ? (
                 <Admin2FAScreen
                   user={user}
                   onVerified={() => setIsAdmin2FAVerified(true)}
-                  onCancel={() => {
-                    setIsAdmin2FAVerified(false);
-                    setCurrentScreen('home');
-                  }}
+                  onCancel={handleSignOut}
                 />
               ) : (
                 <AdminPanelScreen 
@@ -1442,7 +1542,7 @@ export default function App() {
           )}
 
           {/* Company Dashboard (Exclusive Company / RH Workspace) */}
-          {user && !user.isAdmin && (user.accountType === 'company' || user.role?.toLowerCase() === 'empresa' || user.cargo?.toLowerCase() === 'empresa') && (
+          {user && !user.isAdmin && user.status !== 'pending' && !['landing', 'bio', 'privacy', 'terms'].includes(currentScreen) && (user.accountType === 'company' || user.role?.toLowerCase() === 'empresa' || user.cargo?.toLowerCase() === 'empresa') && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel da Empresa">
               <CompanyDashboardScreen
                 user={user}
@@ -1453,7 +1553,7 @@ export default function App() {
           )}
 
           {/* Main App (Protected Student View) */}
-          {user && !user.isAdmin && !(user.accountType === 'company' || user.role?.toLowerCase() === 'empresa' || user.cargo?.toLowerCase() === 'empresa') && currentScreen !== 'admin' && (
+          {user && !user.isAdmin && user.status !== 'pending' && !(user.accountType === 'company' || user.role?.toLowerCase() === 'empresa' || user.cargo?.toLowerCase() === 'empresa') && currentScreen !== 'admin' && (
             <>
               {/* Home */}
               {currentScreen === 'home' && (
@@ -1620,8 +1720,8 @@ export default function App() {
                               >
                                 <div className="flex items-center gap-3 min-w-0">
                                   <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shrink-0">
-                                    {job.logo ? (
-                                      <img src={job.logo} alt={job.company} className="w-full h-full object-cover rounded" />
+                                    {isImageAssetUrl(job.logo) ? (
+                                      <img src={resolveAssetUrl(job.logo)} alt={job.company} className="w-full h-full object-cover rounded" />
                                     ) : (
                                       <Briefcase className="w-4 h-4 text-slate-400" />
                                     )}
@@ -1886,8 +1986,8 @@ export default function App() {
                           >
                             <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                               <div className="w-11 h-11 rounded-xl overflow-hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shrink-0 shadow-2xs">
-                                {job.logo ? (
-                                  <img src={job.logo} alt={job.company} className="w-full h-full object-cover" />
+                                {isImageAssetUrl(job.logo) ? (
+                                  <img src={resolveAssetUrl(job.logo)} alt={job.company} className="w-full h-full object-cover" />
                                 ) : (
                                   <Briefcase className="w-5 h-5 text-slate-400" />
                                 )}

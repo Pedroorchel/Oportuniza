@@ -1,13 +1,18 @@
-# Oportuniza - Como Ativar o GitHub Pages
+# Oportuniza - Como Publicar e Corrigir Tela Branca no GitHub Pages
 
-Se o seu link `https://pedroorchel.github.io/oportunizae/` estiver com tela branca, siga este passo único no seu repositório do GitHub:
+Se o link `https://pedroorchel.github.io/Oportuniza/` estiver com tela branca, siga estes passos no repositório **https://github.com/Pedroorchel/Oportuniza**:
 
-### Passo Rápido (1 minuto):
-1. Acesse o seu repositório no GitHub: **https://github.com/pedroorchel/oportunizae**
-2. Clique na aba **Settings** (Configurações) no menu superior.
-3. No menu lateral esquerdo, clique em **Pages**.
-4. Em **Build and deployment**:
-   - Onde está escrito **Source**, clique e selecione: **GitHub Actions**.
-5. Salve / confirme.
+### 1. Envie os arquivos atualizados e remova o workflow do Jekyll
+1. Envie/sincronize os arquivos atualizados deste projeto para a branch `main` do repositório `Pedroorchel/Oportuniza` (`.github/workflows/deploy.yml`, `vite.config.ts`, `index.html`, `public/.nojekyll` e `src/`).
+2. **Apague** `.github/workflows/jekyll-gh-pages.yml` no GitHub caso ele ainda exista (deve ficar **apenas** `.github/workflows/deploy.yml`).
 
-Pronto! O GitHub vai rodar o workflow que já está criado em `.github/workflows/deploy.yml` e publicar a pasta `dist` gerada com o `base: './'`, fazendo o app carregar imediatamente ao abrir o link.
+### 2. Troque o Source para "GitHub Actions" (Obrigatório!)
+1. No GitHub, abra **Settings** → **Pages**.
+2. Em **Build and deployment**, veja **Source**:
+   - Se estiver em **Deploy from a branch**, mude para **GitHub Actions**.
+   - *(Enquanto estiver em "Deploy from a branch", o processo `pages build and deployment` roda depois do deploy e sobrescreve o site compilado com o `index.html` bruto da raiz, causando a tela branca.)*
+
+### 3. Execute ou aguarde o deploy
+1. Abra a aba **Actions**.
+2. Se não houver uma execução nova após mudar para **GitHub Actions**, clique em **Deploy to GitHub Pages** → **Run workflow** → **Run workflow**.
+3. Aguarde ficar verde (`Success`) e acesse `https://pedroorchel.github.io/Oportuniza/` (use `Ctrl+F5` ou aba anônima se o navegador tiver cache antigo).

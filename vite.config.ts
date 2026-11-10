@@ -3,9 +3,16 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+function resolveBasePath(): string {
+  const raw = (process.env.VITE_BASE_PATH || '').trim();
+  if (!raw || raw === './') return './';
+  const normalized = raw.replace(/\/+/g, '/');
+  return normalized.endsWith('/') ? normalized : `${normalized}/`;
+}
+
 export default defineConfig(() => {
   return {
-    base: './',
+    base: resolveBasePath(),
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

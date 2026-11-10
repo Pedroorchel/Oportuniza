@@ -396,7 +396,7 @@ app.post("/api/update-password", async (req: any, res: any) => {
   const cleanEmail = email.trim().toLowerCase();
 
   try {
-    const defaultSupabaseUrl = "https://sqqiqmzrhmgrtkborskf.supabase.co";
+    const defaultSupabaseUrl = "https://ckzygdwhihybrdzctdup.supabase.co";
     const rawUrl = process.env.VITE_SUPABASE_URL || defaultSupabaseUrl;
     
     // Sanitize URL exactly like the client

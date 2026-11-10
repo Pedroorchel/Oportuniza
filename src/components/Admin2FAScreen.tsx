@@ -54,15 +54,17 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
           userName: user.name
         })
       });
-      const data = await res.json();
-      if (data.delivered) {
-        setEmailStatus({ sending: false, delivered: true, message: `E-mail enviado para ${user.email}!` });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.delivered) {
+        setEmailStatus({ sending: false, delivered: true, message: `E-mail enviado via oportunizahw@gmail.com para ${user.email}!` });
+      } else if (res.ok) {
+        setEmailStatus({ sending: false, delivered: false, message: data?.message || `Código gerado para ${user.email}.` });
       } else {
-        setEmailStatus({ sending: false, delivered: false, message: data.message || `Código enviado para ${user.email}` });
+        setEmailStatus({ sending: false, delivered: false, message: `Não foi possível conectar ao servidor de e-mail agora. Tente reenviar em instantes.` });
       }
     } catch (err) {
       console.warn("Could not send 2FA email:", err);
-      setEmailStatus({ sending: false, delivered: false, message: `Código de verificação gerado para ${user.email}` });
+      setEmailStatus({ sending: false, delivered: false, message: `Erro ao disparar e-mail para ${user.email}. Tente reenviar.` });
     }
   };
 
@@ -167,10 +169,10 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans select-none animate-fadeIn">
+    <div className="w-full h-full min-h-full overflow-y-auto custom-scroll bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-4 sm:p-6 font-sans select-none animate-fadeIn relative">
       
       {/* Background ambient lighting */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-cyan-600/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
       </div>
@@ -178,7 +180,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 flex flex-col gap-6 text-center"
+        className="w-full max-w-md my-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 flex flex-col gap-6 text-center"
       >
         {/* Top Header & Icons */}
         <div className="flex flex-col items-center gap-3">
@@ -215,6 +217,13 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
             <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
               <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400 shrink-0" />
               <span>Conectando ao servidor SMTP e disparando e-mail...</span>
+            </div>
+          ) : emailStatus.delivered === false ? (
+            <div className="p-2.5 bg-amber-950/40 border border-amber-500/40 rounded-xl text-amber-200 text-[11px] font-medium flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">
+                {emailStatus.message || `Não foi possível enviar o e-mail de verificação para ${user.email}. Clique em "Reenviar Código" para tentar novamente.`}
+              </span>
             </div>
           ) : (
             <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-[11px] font-medium flex items-start gap-2">
@@ -276,6 +285,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => verifyCode(digits.join(''))}
               disabled={isVerifying || digits.join('').length < 6}
               className="w-full py-3 px-4 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-98"
@@ -317,8 +327,9 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
         {/* Footer Return Button */}
         <div className="pt-2 border-t border-slate-800/80">
           <button
+            type="button"
             onClick={onCancel}
-            className="text-xs text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5 mx-auto font-medium"
+            className="text-xs text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5 mx-auto font-medium py-1 px-3 rounded-lg hover:bg-slate-800/60"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Cancelar e Voltar ao Início</span>

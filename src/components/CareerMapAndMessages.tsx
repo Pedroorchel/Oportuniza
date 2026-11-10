@@ -205,6 +205,10 @@ Dúvidas sobre como usar a plataforma, reportar erros ou enviar sugestões? Digi
         }),
       });
 
+      if (!response.ok) {
+        throw new Error(`Mentor endpoint unavailable (${response.status})`);
+      }
+
       const data = await response.json();
       
       const replyMsg: ChatMessage = {

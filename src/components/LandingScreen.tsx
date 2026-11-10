@@ -7,6 +7,7 @@ import {
 import { ScreenId } from '../types';
 import DesktopLanding from './DesktopLanding';
 import { useTheme } from '../lib/theme';
+import { resolveAssetUrl } from '../lib/assets';
 
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
@@ -32,11 +33,12 @@ export default function LandingScreen({ onNavigate }: LandingScreenProps) {
   return (
     <div className="w-full h-full overflow-y-auto custom-scroll bg-[#F8FAFC] dark:bg-[#0B1120] text-slate-900 dark:text-slate-100 relative select-none transition-colors">
       
-      {/* Theme Toggle */}
-      <div className="absolute top-4 right-4 z-50">
+      {/* Theme Toggle (Mobile only — Desktop header includes toggle inline) */}
+      <div className="md:hidden absolute top-4 right-4 z-50">
         <button 
+          type="button"
           onClick={toggleTheme}
-          className="p-2.5 bg-white/90 dark:bg-slate-800/90 backdrop-blur rounded-2xl shadow-sm hover:bg-gray-100 dark:hover:bg-slate-700 transition-all border border-gray-100 dark:border-slate-700 text-gray-700 dark:text-gray-300"
+          className="p-2.5 bg-white/90 dark:bg-slate-800/90 backdrop-blur rounded-2xl shadow-sm hover:bg-gray-100 dark:hover:bg-slate-700 transition-all border border-gray-100 dark:border-slate-700 text-gray-700 dark:text-gray-300 cursor-pointer"
           title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
         >
           {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-sky-500" />}
@@ -121,7 +123,7 @@ export default function LandingScreen({ onNavigate }: LandingScreenProps) {
                     >
                       <div className="w-10 h-10 rounded-xl overflow-hidden bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 shadow-xs shrink-0 p-0.5 flex items-center justify-center ring-2 ring-black/5 dark:ring-white/5">
                         <img 
-                          src={item.logoImg} 
+                          src={resolveAssetUrl(item.logoImg)} 
                           alt={item.company} 
                           className="w-full h-full object-contain rounded-lg"
                           loading="lazy"

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Send, FileText, MessageSquare, Table2, Terminal, BookOpen, CheckCircle, AlertCircle, MapPin, Play, Heart, Briefcase, DollarSign, Calendar, Clock, Award, Shield, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Job, Course, Enrollment } from '../types';
+import { isImageAssetUrl, resolveAssetUrl } from '../lib/assets';
 
 interface DetailsScreenProps {
   job?: Job;
@@ -382,8 +383,8 @@ export default function DetailsScreen({
                 {/* Logo and Titles */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
                   <div className="w-14 h-14 rounded-2xl border border-gray-100 flex items-center justify-center bg-white shadow-sm shrink-0 overflow-hidden select-none">
-                    {job?.logo?.startsWith('http') || job?.logo?.startsWith('data:') ? (
-                      <img src={job.logo} alt={job.company} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    {isImageAssetUrl(job?.logo) ? (
+                      <img src={resolveAssetUrl(job?.logo)} alt={job?.company || 'Empresa'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <span className="text-[#E20015] font-black text-sm tracking-tighter uppercase">
                         {job?.company.substring(0, 5) || 'VAGA'}

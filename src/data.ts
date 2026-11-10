@@ -1,5 +1,24 @@
 import { Job, Course } from './types';
 import { supabase } from './lib/supabaseClient';
+import { resolveAssetUrl } from './lib/assets';
+
+function safeSetLocalStorage(key: string, value: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch {
+    // Ignore storage quota or SecurityError in restricted environments
+  }
+}
+
+function normalizeJobAssets(job: Job): Job {
+  return {
+    ...job,
+    logo: job.logo ? resolveAssetUrl(job.logo) : job.logo,
+    companyLogoUrl: job.companyLogoUrl ? resolveAssetUrl(job.companyLogoUrl) : job.companyLogoUrl,
+  };
+}
 
 const DEFAULT_JOBS: Job[] = [
   {
@@ -1240,9 +1259,10 @@ const DEFAULT_COURSES: Course[] = [
 export const mockJobs: Job[] = (() => {
   try {
     const saved = localStorage.getItem('oportuniza-admin-jobs');
-    return saved ? JSON.parse(saved) : DEFAULT_JOBS;
+    const list = saved ? JSON.parse(saved) : DEFAULT_JOBS;
+    return Array.isArray(list) ? list.map(normalizeJobAssets) : DEFAULT_JOBS.map(normalizeJobAssets);
   } catch {
-    return DEFAULT_JOBS;
+    return DEFAULT_JOBS.map(normalizeJobAssets);
   }
 })();
 
@@ -1262,7 +1282,7 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
   const mergedLocalJobsMap = new Map<string, Job>();
   
   // Populate default list first
-  DEFAULT_JOBS.forEach(j => mergedLocalJobsMap.set(j.id, j));
+  DEFAULT_JOBS.forEach(j => mergedLocalJobsMap.set(j.id, normalizeJobAssets(j)));
   
   try {
     const backupJobsA = localStorage.getItem('oportuniza-jobs');
@@ -1270,7 +1290,7 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
       const parsed = JSON.parse(backupJobsA);
       if (Array.isArray(parsed)) {
         parsed.forEach(j => {
-          if (j && j.id) mergedLocalJobsMap.set(j.id, j);
+          if (j && j.id) mergedLocalJobsMap.set(j.id, normalizeJobAssets(j));
         });
       }
     }
@@ -1284,7 +1304,7 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
       const parsed = JSON.parse(backupJobsB);
       if (Array.isArray(parsed)) {
         parsed.forEach(j => {
-          if (j && j.id) mergedLocalJobsMap.set(j.id, j);
+          if (j && j.id) mergedLocalJobsMap.set(j.id, normalizeJobAssets(j));
         });
       }
     }
@@ -1303,8 +1323,8 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
       const fallbackList = Array.from(mergedLocalJobsMap.values());
       mockJobs.length = 0;
       mockJobs.push(...fallbackList);
-      localStorage.setItem('oportuniza-admin-jobs', JSON.stringify(fallbackList));
-      localStorage.setItem('oportuniza-jobs', JSON.stringify(fallbackList));
+      safeSetLocalStorage('oportuniza-admin-jobs', JSON.stringify(fallbackList));
+      safeSetLocalStorage('oportuniza-jobs', JSON.stringify(fallbackList));
       window.dispatchEvent(new Event('oportuniza-jobs-changed'));
       return false;
     }
@@ -1322,7 +1342,7 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
       location: item.location,
       lat: item.lat,
       lng: item.lng,
-      logo: item.logo || item.company_logo_url || 'Briefcase',
+      logo: resolveAssetUrl(item.logo || item.company_logo_url || 'Briefcase'),
       dateString: item.dateString || item.posted_date || 'Hoje',
       color: item.color,
       active: item.active !== false,
@@ -1335,7 +1355,7 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
       companyContactEmail: item.companyContactEmail || item.company_contact_email || undefined,
       companyResponsibleName: item.companyResponsibleName || item.company_responsible_name || undefined,
       companyResponsibleRole: item.companyResponsibleRole || item.company_responsible_role || undefined,
-      companyLogoUrl: item.companyLogoUrl || item.company_logo_url || item.logo || undefined,
+      companyLogoUrl: item.companyLogoUrl || item.company_logo_url || item.logo ? resolveAssetUrl(item.companyLogoUrl || item.company_logo_url || item.logo) : undefined,
       cnpj: item.cnpj || undefined,
       approvalStatus: item.approvalStatus || item.approval_status || (item.company?.includes('FarmaBem') || item.company?.includes('Indústria') ? 'accepted' : 'accepted'),
       approvedBy: item.approvedBy || item.approved_by || undefined,
@@ -1394,8 +1414,8 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
 
     mockJobs.length = 0;
     mockJobs.push(...finalMergedJobs);
-    localStorage.setItem('oportuniza-admin-jobs', JSON.stringify(finalMergedJobs));
-    localStorage.setItem('oportuniza-jobs', JSON.stringify(finalMergedJobs));
+    safeSetLocalStorage('oportuniza-admin-jobs', JSON.stringify(finalMergedJobs));
+    safeSetLocalStorage('oportuniza-jobs', JSON.stringify(finalMergedJobs));
     window.dispatchEvent(new Event('oportuniza-jobs-changed'));
     return true;
   } catch (err) {
@@ -1403,8 +1423,8 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
     const fallbackList = Array.from(mergedLocalJobsMap.values());
     mockJobs.length = 0;
     mockJobs.push(...fallbackList);
-    localStorage.setItem('oportuniza-admin-jobs', JSON.stringify(fallbackList));
-    localStorage.setItem('oportuniza-jobs', JSON.stringify(fallbackList));
+    safeSetLocalStorage('oportuniza-admin-jobs', JSON.stringify(fallbackList));
+    safeSetLocalStorage('oportuniza-jobs', JSON.stringify(fallbackList));
     window.dispatchEvent(new Event('oportuniza-jobs-changed'));
   }
   return false;
@@ -1476,8 +1496,8 @@ export const loadCoursesFromSupabase = async (): Promise<boolean> => {
       const fallbackList = Array.from(mergedLocalCoursesMap.values()).filter(c => c && c.title && c.title.trim() !== '');
       mockCourses.length = 0;
       mockCourses.push(...fallbackList);
-      localStorage.setItem('oportuniza-admin-courses', JSON.stringify(fallbackList));
-      localStorage.setItem('oportuniza-courses', JSON.stringify(fallbackList));
+      safeSetLocalStorage('oportuniza-admin-courses', JSON.stringify(fallbackList));
+      safeSetLocalStorage('oportuniza-courses', JSON.stringify(fallbackList));
       window.dispatchEvent(new Event('oportuniza-courses-changed'));
       return false;
     }
@@ -1546,8 +1566,8 @@ export const loadCoursesFromSupabase = async (): Promise<boolean> => {
 
     mockCourses.length = 0;
     mockCourses.push(...finalMergedCourses);
-    localStorage.setItem('oportuniza-admin-courses', JSON.stringify(finalMergedCourses));
-    localStorage.setItem('oportuniza-courses', JSON.stringify(finalMergedCourses));
+    safeSetLocalStorage('oportuniza-admin-courses', JSON.stringify(finalMergedCourses));
+    safeSetLocalStorage('oportuniza-courses', JSON.stringify(finalMergedCourses));
     window.dispatchEvent(new Event('oportuniza-courses-changed'));
     return true;
   } catch (err) {
@@ -1555,8 +1575,8 @@ export const loadCoursesFromSupabase = async (): Promise<boolean> => {
     const fallbackList = Array.from(mergedLocalCoursesMap.values());
     mockCourses.length = 0;
     mockCourses.push(...fallbackList);
-    localStorage.setItem('oportuniza-admin-courses', JSON.stringify(fallbackList));
-    localStorage.setItem('oportuniza-courses', JSON.stringify(fallbackList));
+    safeSetLocalStorage('oportuniza-admin-courses', JSON.stringify(fallbackList));
+    safeSetLocalStorage('oportuniza-courses', JSON.stringify(fallbackList));
     window.dispatchEvent(new Event('oportuniza-courses-changed'));
   }
   return false;
@@ -1567,8 +1587,8 @@ export const deleteJobPermanently = async (jobId: string): Promise<boolean> => {
   if (index !== -1) {
     mockJobs.splice(index, 1);
   }
-  localStorage.setItem('oportuniza-admin-jobs', JSON.stringify(mockJobs));
-  localStorage.setItem('oportuniza-jobs', JSON.stringify(mockJobs));
+  safeSetLocalStorage('oportuniza-admin-jobs', JSON.stringify(mockJobs));
+  safeSetLocalStorage('oportuniza-jobs', JSON.stringify(mockJobs));
   window.dispatchEvent(new Event('oportuniza-jobs-changed'));
 
   try {
@@ -1586,8 +1606,8 @@ export const deleteJobPermanently = async (jobId: string): Promise<boolean> => {
 export const saveAdminJobs = async (jobs: Job[]) => {
   mockJobs.length = 0;
   mockJobs.push(...jobs);
-  localStorage.setItem('oportuniza-admin-jobs', JSON.stringify(jobs));
-  localStorage.setItem('oportuniza-jobs', JSON.stringify(jobs));
+  safeSetLocalStorage('oportuniza-admin-jobs', JSON.stringify(jobs));
+  safeSetLocalStorage('oportuniza-jobs', JSON.stringify(jobs));
   window.dispatchEvent(new Event('oportuniza-jobs-changed'));
 
   try {
@@ -1656,8 +1676,8 @@ export const saveAdminCourses = async (courses: Course[]) => {
   const filteredCourses = (courses || []).filter(c => c && c.title && c.title.trim() !== '');
   mockCourses.length = 0;
   mockCourses.push(...filteredCourses);
-  localStorage.setItem('oportuniza-admin-courses', JSON.stringify(filteredCourses));
-  localStorage.setItem('oportuniza-courses', JSON.stringify(filteredCourses));
+  safeSetLocalStorage('oportuniza-admin-courses', JSON.stringify(filteredCourses));
+  safeSetLocalStorage('oportuniza-courses', JSON.stringify(filteredCourses));
   window.dispatchEvent(new Event('oportuniza-courses-changed'));
 
   try {

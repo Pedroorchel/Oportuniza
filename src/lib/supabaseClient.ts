@@ -12,6 +12,43 @@ const supabaseUrl = rawUrl
 
 const supabaseAnonKey = rawKey.trim();
 
+// Safe storage adapter so restricted/incognito browsers never crash at module load
+function createSafeStorage() {
+  const memoryFallback = new Map<string, string>();
+  return {
+    getItem(key: string): string | null {
+      try {
+        return typeof window !== 'undefined' && window.localStorage
+          ? window.localStorage.getItem(key)
+          : (memoryFallback.get(key) ?? null);
+      } catch {
+        return memoryFallback.get(key) ?? null;
+      }
+    },
+    setItem(key: string, value: string): void {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, value);
+          return;
+        }
+      } catch {
+        // Fallback to memory storage when localStorage is blocked
+      }
+      memoryFallback.set(key, value);
+    },
+    removeItem(key: string): void {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(key);
+        }
+      } catch {
+        // Ignore storage restrictions
+      }
+      memoryFallback.delete(key);
+    },
+  };
+}
+
 // Direct Supabase Client connected to your database
 export const supabase = createClient(
   supabaseUrl, 
@@ -21,7 +58,7 @@ export const supabase = createClient(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storage: window.localStorage // Store auth tokens securely for session persistence
+      storage: createSafeStorage()
     }
   }
 );

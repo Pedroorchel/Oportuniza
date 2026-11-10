@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase, getAppRedirectUrl } from '../lib/supabaseClient';
 import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from '../lib/blockedAccounts';
 import { saveCompanyProfile } from '../lib/companyService';
-import { Mail, Lock, User, ArrowRight, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, ShieldAlert, Building2, Briefcase, Phone, MapPin, FileText, Sparkles, Headphones, KeyRound, CheckCircle2, Moon, Sun } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, ShieldAlert, Building2, Briefcase, Phone, MapPin, FileText, Sparkles, Headphones, KeyRound, CheckCircle2, Moon, Sun, RefreshCw, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ScreenId, User as AppUser } from '../types';
 import { validateEmailAddress, validatePersonOrCompanyName, validateCnpj, containsOffensiveLanguage, validatePhoneNumber } from '../lib/securityValidation';
@@ -43,12 +43,22 @@ const COMPANY_SEGMENTS = [
   'Outro Segmento'
 ];
 
+const EDUCATION_OPTIONS = [
+  'Ensino Fundamental',
+  'Ensino Médio em andamento',
+  'Ensino Médio Completo',
+  'Ensino Técnico',
+  'Ensino Superior em andamento',
+  'Ensino Superior Completo'
+];
+
 interface AuthScreenProps {
   onNavigate?: (screen: ScreenId) => void;
   defaultIsLogin?: boolean;
   onLoginSuccess?: (user: AppUser) => void;
   onAdminLoginSuccess?: (adminUser: any) => void;
-  enforceVerificationForEmail?: string;
+  enforceVerificationUser?: AppUser;
+  onSignOut?: () => void;
 }
 
 export default function AuthScreen({ 
@@ -56,25 +66,14 @@ export default function AuthScreen({
   defaultIsLogin = true, 
   onLoginSuccess, 
   onAdminLoginSuccess,
-  enforceVerificationForEmail 
+  enforceVerificationUser,
+  onSignOut
 }: AuthScreenProps) {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   
   const [isLogin, setIsLogin] = useState(defaultIsLogin);
   const [isRecover, setIsRecover] = useState(false);
-
-  // ... (rest of the component)
-
-  useEffect(() => {
-    if (enforceVerificationForEmail) {
-      setEmail(enforceVerificationForEmail);
-      setIsLogin(false);
-      // Trigger verification logic
-      setVerificationSent(true);
-      setRegisteredEmail(enforceVerificationForEmail);
-    }
-  }, [enforceVerificationForEmail]);
 
   // Account Type: candidate vs company (only Admin can assign Level 2 Atendimento)
   const [accountType, setAccountType] = useState<'candidate' | 'company'>('candidate');
@@ -83,6 +82,7 @@ export default function AuthScreen({
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [neighborhood, setNeighborhood] = useState(ARAUCARIA_NEIGHBORHOODS[0]);
+  const [education, setEducation] = useState(EDUCATION_OPTIONS[1]);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -120,12 +120,29 @@ export default function AuthScreen({
   const [regVerifyCodeInput, setRegVerifyCodeInput] = useState('');
   const [sentRegCode, setSentRegCode] = useState('');
   const [tempLoggedUser, setTempLoggedUser] = useState<AppUser | null>(null);
+  const [regTimer, setRegTimer] = useState(0);
+  const [regEmailStatus, setRegEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
+  const regDispatchLockRef = useRef<{ email: string; at: number } | null>(null);
+
+  // OAuth / Google Mandatory 2FA + Profile Completion states
+  const [oauthStep, setOauthStep] = useState<'verify-code' | 'complete-info'>('verify-code');
+  const [oauthCodeInput, setOauthCodeInput] = useState('');
+  const [oauthSentCode, setOauthSentCode] = useState('');
+  const [oauthTimer, setOauthTimer] = useState(0);
+  const [oauthEmailStatus, setOauthEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
+  const oauthDispatchedEmailRef = useRef<string | null>(null);
 
   // Login 2FA states
   const [isVerifying2FA, setIsVerifying2FA] = useState(false);
   const [login2FACodeInput, setLogin2FACodeInput] = useState('');
   const [sentLogin2FACode, setSentLogin2FACode] = useState('');
   const [pendingUser, setPendingUser] = useState<AppUser | null>(null);
+
+  useEffect(() => {
+    if (!enforceVerificationUser) {
+      setIsLogin(defaultIsLogin);
+    }
+  }, [defaultIsLogin, enforceVerificationUser]);
 
   // Format CNPJ as 00.000.000/0000-00
   const handleCnpjChange = (value: string) => {
@@ -360,10 +377,10 @@ export default function AuthScreen({
             body: JSON.stringify({ email: cleanRecEmail, newPassword: newPassword })
           });
 
-          const result = await response.json();
+          const result = await response.json().catch(() => ({}));
 
           if (!response.ok) {
-            const errorMsg = result.hint ? `${result.error}. ${result.hint}` : (result.error || 'Falha ao sincronizar nova senha.');
+            const errorMsg = result.hint ? `${result.error}. ${result.hint}` : (result.error || 'Este recurso requer servidor ativo. Use o link de redefinição enviado por e-mail.');
             throw new Error(errorMsg);
           }
 
@@ -679,6 +696,9 @@ export default function AuthScreen({
           full_name: displayName,
           account_type: accountType,
           phone: phone.trim(),
+          requires_activation: true,
+          account_activated: false,
+          profile_completed: true,
           role: isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Candidato'),
           cargo: isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Estudante')
         };
@@ -693,6 +713,10 @@ export default function AuthScreen({
           userMetadata.neighborhood = neighborhood;
         }
 
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('oportuniza-reg-in-progress', cleanEmail);
+        }
+
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ 
           email: cleanEmail, 
           password,
@@ -703,6 +727,9 @@ export default function AuthScreen({
         });
 
         if (signUpError) {
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('oportuniza-reg-in-progress');
+          }
           const lowerErr = (signUpError.message || '').toLowerCase();
           if (lowerErr.includes('already registered') || lowerErr.includes('already exists') || lowerErr.includes('duplicate')) {
             throw new Error('Este e-mail já está sendo utilizado ou encontra-se bloqueado.');
@@ -710,11 +737,13 @@ export default function AuthScreen({
           throw signUpError;
         }
         
-        // --- NOVO FLUXO: Verificação por Código de 6 Dígitos ---
+        // --- Verificação por Código de 6 Dígitos ---
         const registrationCode = Math.floor(100000 + Math.random() * 900000).toString();
         setSentRegCode(registrationCode);
+        setRegVerifyCodeInput('');
+        setRegTimer(60);
         
-        // Armazenamos temporariamente os dados do usuário para logar após a verificação
+        // Armazenamos temporariamente os dados do usuário para salvar e logar após a verificação
         const newUser: AppUser = {
           id: signUpData?.user?.id || 'usr-' + Date.now(),
           name: displayName || cleanEmail.split('@')[0],
@@ -723,11 +752,12 @@ export default function AuthScreen({
           bio: accountType === 'company' 
             ? `Empresa atuante no setor ${companySegment} em Araucária` 
             : `Candidato em Araucária (${neighborhood})`,
-          education: accountType === 'company' ? 'Empresa / Empregador' : 'Ensino Médio em andamento',
+          education: accountType === 'company' ? 'Empresa / Empregador' : education,
           experience: accountType === 'company' ? 'Empresa Contratante em Araucária' : 'Nenhuma registrada',
           phone: phone.trim(),
           skills: [],
           favorites: [],
+          status: 'pending',
           accountType: accountType === 'company' ? 'company' : 'candidate',
           companyName: accountType === 'company' ? companyName.trim() : undefined,
           cnpj: accountType === 'company' ? cnpj.trim() : undefined,
@@ -740,33 +770,478 @@ export default function AuthScreen({
         
         setTempLoggedUser(newUser);
 
-        // Enviar e-mail de ativação via backend
-        // Use a ref to ensure it's only sent once
-        if (!(window as any).registrationEmailSent) {
-          (window as any).registrationEmailSent = true;
-          try {
-            await fetch('/api/send-registration-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                email: cleanEmail, 
-                code: registrationCode,
-                userName: newUser.name
-              })
+        // Enviar e-mail de ativação via backend (evitando apenas duplo-clique simultâneo)
+        const nowTs = Date.now();
+        const isDuplicateRapidClick =
+          regDispatchLockRef.current &&
+          regDispatchLockRef.current.email === cleanEmail &&
+          nowTs - regDispatchLockRef.current.at < 3000;
+
+        if (!isDuplicateRapidClick) {
+          regDispatchLockRef.current = { email: cleanEmail, at: nowTs };
+          setRegEmailStatus({ sending: true });
+          const mailResult = await sendActivationCodeEmail(cleanEmail, registrationCode, newUser.name);
+          if (mailResult.delivered) {
+            setRegEmailStatus({
+              sending: false,
+              delivered: true,
+              message: `Código de 6 dígitos enviado via oportunizahw@gmail.com para ${cleanEmail}.`
             });
-          } catch (mailErr) {
-            console.error("Falha ao enviar e-mail de ativação:", mailErr);
+            setSuccess(`Um código de 6 dígitos foi enviado para ${cleanEmail}. Digite-o abaixo para ativar sua conta.`);
+          } else {
+            setRegEmailStatus({
+              sending: false,
+              delivered: false,
+              message: mailResult.error || `Não foi possível confirmar o envio do e-mail para ${cleanEmail}. Tente reenviar em instantes.`
+            });
+            setSuccess(null);
           }
         }
 
-        // Troca para o estado de verificação
         setIsVerifyingReg(true);
-        setSuccess(`Um código de 6 dígitos foi enviado para ${cleanEmail}. Digite-o para ativar sua conta.`);
         setLoading(false);
         return;
       }
     } catch (err: any) {
       setError(getFriendlyErrorMessage(err.message || 'Ocorreu um erro na autenticação'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  async function sendActivationCodeEmail(targetEmail: string, codeToSend: string, targetName: string): Promise<{ ok: boolean; delivered: boolean; error?: string }> {
+    try {
+      const response = await fetch('/api/send-registration-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: targetEmail,
+          code: codeToSend,
+          userName: targetName
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data?.delivered) {
+        return { ok: true, delivered: true };
+      }
+      if (response.ok) {
+        return { ok: true, delivered: false, error: 'Servidor de disparo de e-mail em modo contingência.' };
+      }
+      return {
+        ok: false,
+        delivered: false,
+        error: data?.details || data?.error || 'Não foi possível enviar o código por e-mail agora.'
+      };
+    } catch (err: any) {
+      console.warn('Falha ao conectar no servidor de e-mail:', err);
+      return {
+        ok: false,
+        delivered: false,
+        error: 'Não foi possível conectar ao serviço de envio de e-mail neste ambiente.'
+      };
+    }
+  }
+
+  async function upsertUserProfileSafely(fullPayload: Record<string, any>, fallbackPayload: Record<string, any>) {
+    try {
+      const { error: firstErr } = await supabase
+        .from('users')
+        .upsert(fullPayload, { onConflict: 'id' });
+
+      if (firstErr) {
+        const msg = (firstErr.message || '').toLowerCase();
+        const isMissingCol =
+          firstErr.code === 'PGRST204' ||
+          (firstErr as any).code === '42703' ||
+          msg.includes('column') ||
+          msg.includes('schema cache');
+
+        if (isMissingCol) {
+          const { error: secondErr } = await supabase
+            .from('users')
+            .upsert(fallbackPayload, { onConflict: 'id' });
+          if (secondErr) {
+            console.warn('Fallback users upsert warning:', secondErr.message);
+          }
+        } else {
+          console.warn('Users upsert warning:', firstErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn('Exception during users profile upsert:', e);
+    }
+  }
+
+  const dispatchOAuthCode = async (targetUser: AppUser) => {
+    const cleanTargetEmail = (targetUser.email || '').trim().toLowerCase();
+    if (!cleanTargetEmail) return;
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setOauthSentCode(code);
+    setOauthCodeInput('');
+    setOauthTimer(60);
+    setError(null);
+    setSuccess(null);
+    setOauthEmailStatus({ sending: true });
+
+    const res = await sendActivationCodeEmail(
+      cleanTargetEmail,
+      code,
+      targetUser.name || cleanTargetEmail.split('@')[0]
+    );
+
+    if (res.delivered) {
+      setOauthEmailStatus({
+        sending: false,
+        delivered: true,
+        message: `Código enviado via oportunizahw@gmail.com para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
+      });
+    } else {
+      setOauthEmailStatus({
+        sending: false,
+        delivered: false,
+        message: res.error || `Não foi possível enviar o código para ${cleanTargetEmail}. Clique em "Reenviar código".`
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!enforceVerificationUser) {
+      oauthDispatchedEmailRef.current = null;
+      return;
+    }
+
+    const cleanTargetEmail = (enforceVerificationUser.email || '').trim().toLowerCase();
+    setEmail(cleanTargetEmail);
+    setRegisteredEmail(cleanTargetEmail);
+    setVerificationSent(false);
+    setIsLogin(false);
+    setIsRecover(false);
+    setIsAdminMode(false);
+    setOauthStep('verify-code');
+    setError(null);
+    setSuccess(null);
+
+    if (enforceVerificationUser.accountType === 'company') {
+      setAccountType('company');
+      setCompanyName(enforceVerificationUser.companyName || enforceVerificationUser.name || '');
+      setResponsibleName(enforceVerificationUser.responsibleName || enforceVerificationUser.name || '');
+      setCnpj(enforceVerificationUser.cnpj || '');
+      if (enforceVerificationUser.companySegment) setCompanySegment(enforceVerificationUser.companySegment);
+      if (enforceVerificationUser.companyNeighborhood) setCompanyNeighborhood(enforceVerificationUser.companyNeighborhood);
+    } else {
+      setAccountType('candidate');
+      setFullName(enforceVerificationUser.name || '');
+      if (enforceVerificationUser.education && EDUCATION_OPTIONS.includes(enforceVerificationUser.education)) {
+        setEducation(enforceVerificationUser.education);
+      }
+    }
+
+    if (enforceVerificationUser.phone) {
+      handlePhoneChange(enforceVerificationUser.phone);
+    }
+
+    if (oauthDispatchedEmailRef.current === cleanTargetEmail) {
+      return;
+    }
+    oauthDispatchedEmailRef.current = cleanTargetEmail;
+    dispatchOAuthCode(enforceVerificationUser);
+  }, [enforceVerificationUser]);
+
+  useEffect(() => {
+    if (oauthTimer <= 0) return;
+    const interval = setInterval(() => {
+      setOauthTimer(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [oauthTimer]);
+
+  useEffect(() => {
+    if (regTimer <= 0) return;
+    const interval = setInterval(() => {
+      setRegTimer(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [regTimer]);
+
+  const handleResendRegCode = async () => {
+    if (regTimer > 0) return;
+    const targetEmail = (tempLoggedUser?.email || email).trim().toLowerCase();
+    if (!targetEmail) return;
+
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    setSentRegCode(newCode);
+    setRegTimer(60);
+    setError(null);
+    setSuccess(null);
+    setRegEmailStatus({ sending: true });
+
+    const mailResult = await sendActivationCodeEmail(targetEmail, newCode, tempLoggedUser?.name || fullName || companyName || targetEmail.split('@')[0]);
+    if (mailResult.delivered) {
+      setRegEmailStatus({
+        sending: false,
+        delivered: true,
+        message: `Novo código enviado via oportunizahw@gmail.com para ${targetEmail}.`
+      });
+      setSuccess(`Reenviamos um novo código de 6 dígitos para ${targetEmail}.`);
+    } else {
+      setRegEmailStatus({
+        sending: false,
+        delivered: false,
+        message: mailResult.error || `Falha ao reenviar código para ${targetEmail}.`
+      });
+    }
+  };
+
+  const handleVerifyOAuthCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    const entered = oauthCodeInput.trim();
+    if (entered.length !== 6) {
+      setError('Digite os 6 dígitos do código de ativação enviado para o seu e-mail.');
+      return;
+    }
+    if (!oauthSentCode || entered !== oauthSentCode) {
+      setError('Código de ativação incorreto. Confira o código recebido no seu e-mail e tente novamente.');
+      return;
+    }
+
+    setSuccess('Código 2FA verificado! Agora preencha suas informações para liberar sua conta.');
+    setOauthStep('complete-info');
+  };
+
+  const handleCompleteOAuthProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!enforceVerificationUser) return;
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    const cleanTargetEmail = (enforceVerificationUser.email || email).trim().toLowerCase();
+    const isSupportRegistration =
+      cleanTargetEmail.includes('atendimento') ||
+      cleanTargetEmail.includes('suporte') ||
+      cleanTargetEmail.includes('atendente');
+
+    if (accountType === 'candidate') {
+      const nameVal = validatePersonOrCompanyName(fullName, false);
+      if (!nameVal.isValid) {
+        setError(nameVal.error || 'Por favor, informe seu nome completo real.');
+        setLoading(false);
+        return;
+      }
+      const offensiveName = containsOffensiveLanguage(fullName);
+      if (offensiveName.found) {
+        setError(`Cadastro bloqueado: O nome informado contém termo inapropriado ("${offensiveName.word}").`);
+        setLoading(false);
+        return;
+      }
+      if (!phone.replace(/\D/g, '').length) {
+        setError('Por favor, informe seu número de WhatsApp / Telefone com DDD.');
+        setLoading(false);
+        return;
+      }
+      const phoneVal = validatePhoneNumber(phone);
+      if (!phoneVal.isValid) {
+        setError(phoneVal.error || 'Número de telefone inválido.');
+        setLoading(false);
+        return;
+      }
+      if (!lgpdAccepted) {
+        setError('Atenção: É obrigatório aceitar os Termos de Uso e LGPD (Lei nº 13.709/18) para concluir seu cadastro.');
+        setLoading(false);
+        return;
+      }
+    } else {
+      const compVal = validatePersonOrCompanyName(companyName, true);
+      if (!compVal.isValid) {
+        setError(compVal.error || 'Por favor, informe a Razão Social ou Nome Fantasia real.');
+        setLoading(false);
+        return;
+      }
+      const respVal = validatePersonOrCompanyName(responsibleName, false);
+      if (!respVal.isValid) {
+        setError(respVal.error || 'Por favor, informe o nome do Responsável ou RH.');
+        setLoading(false);
+        return;
+      }
+      const compOffensive = containsOffensiveLanguage(companyName);
+      if (compOffensive.found) {
+        setError(`Cadastro de Empresa bloqueado: Razão Social contém termo inapropriado ("${compOffensive.word}").`);
+        setLoading(false);
+        return;
+      }
+      const respOffensive = containsOffensiveLanguage(responsibleName);
+      if (respOffensive.found) {
+        setError(`Cadastro de Empresa bloqueado: Nome do responsável contém termo inapropriado ("${respOffensive.word}").`);
+        setLoading(false);
+        return;
+      }
+      if (!phone.replace(/\D/g, '').length) {
+        setError('Por favor, informe o WhatsApp Comercial / RH com DDD.');
+        setLoading(false);
+        return;
+      }
+      const phoneVal = validatePhoneNumber(phone);
+      if (!phoneVal.isValid) {
+        setError(phoneVal.error || 'Número de telefone comercial inválido.');
+        setLoading(false);
+        return;
+      }
+      const cnpjVal = validateCnpj(cnpj);
+      if (!cnpjVal.isValid) {
+        setError(cnpjVal.error || 'CNPJ inválido.');
+        setLoading(false);
+        return;
+      }
+      if (!lgpdAccepted) {
+        setError('Atenção: É obrigatório ler e aceitar o Termo de Responsabilidade Jurídica e a LGPD para concluir o cadastro.');
+        setLoading(false);
+        return;
+      }
+    }
+
+    try {
+      const { data: { user: sessionUser } } = await supabase.auth.getUser();
+      const userId = sessionUser?.id || enforceVerificationUser.id || 'usr-' + Date.now();
+      const displayName = accountType === 'company' ? companyName.trim() : fullName.trim();
+      const resolvedRole = isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Candidato');
+      const resolvedCargo = isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Estudante');
+      const resolvedBio =
+        accountType === 'company'
+          ? `Empresa atuante no setor ${companySegment} em Araucária (${companyNeighborhood})`
+          : `Candidato em Araucária (${neighborhood})`;
+      const resolvedEducation = accountType === 'company' ? 'Empresa / Empregador' : education;
+      const resolvedExperience = accountType === 'company' ? 'Empresa Contratante em Araucária' : (enforceVerificationUser.experience || 'Nenhuma registrada');
+
+      const activatedUser: AppUser = {
+        ...enforceVerificationUser,
+        id: userId,
+        name: displayName,
+        email: cleanTargetEmail,
+        phone: phone.trim(),
+        bio: resolvedBio,
+        education: resolvedEducation,
+        experience: resolvedExperience,
+        status: 'active',
+        accountType: accountType === 'company' ? 'company' : 'candidate',
+        companyName: accountType === 'company' ? companyName.trim() : undefined,
+        cnpj: accountType === 'company' ? cnpj.trim() : undefined,
+        responsibleName: accountType === 'company' ? responsibleName.trim() : undefined,
+        companySegment: accountType === 'company' ? companySegment : undefined,
+        companyNeighborhood: accountType === 'company' ? companyNeighborhood : neighborhood,
+        role: resolvedRole,
+        cargo: resolvedCargo
+      };
+
+      const basePayload = {
+        id: userId,
+        name: displayName,
+        email: cleanTargetEmail,
+        avatar_url: activatedUser.avatarUrl || '',
+        phone: phone.trim(),
+        bio: resolvedBio,
+        education: resolvedEducation,
+        experience: resolvedExperience,
+        skills: activatedUser.skills || [],
+        updated_at: new Date().toISOString()
+      };
+
+      const fullPayload: Record<string, any> = {
+        ...basePayload,
+        status: 'active',
+        account_type: activatedUser.accountType,
+        role: resolvedRole,
+        cargo: resolvedCargo
+      };
+
+      if (accountType === 'company') {
+        fullPayload.company_name = companyName.trim();
+        fullPayload.cnpj = cnpj.trim();
+        fullPayload.responsible_name = responsibleName.trim();
+        fullPayload.company_segment = companySegment;
+        fullPayload.company_neighborhood = companyNeighborhood;
+      }
+
+      await upsertUserProfileSafely(fullPayload, basePayload);
+
+      if (accountType === 'company') {
+        try {
+          await saveCompanyProfile({
+            user_id: userId,
+            company_name: companyName.trim(),
+            cnpj: cnpj.trim(),
+            responsible_name: responsibleName.trim(),
+            responsible_role: 'RH / Proprietário',
+            email: cleanTargetEmail,
+            phone: phone.trim(),
+            segment: companySegment,
+            neighborhood: companyNeighborhood,
+            status: 'active',
+            verified: false,
+            bio: resolvedBio
+          });
+        } catch (compErr) {
+          console.warn('Company profile save notice:', compErr);
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`oportuniza-activated-${cleanTargetEmail}`, 'true');
+        localStorage.setItem('oportuniza-current-user', JSON.stringify(activatedUser));
+        sessionStorage.removeItem('oportuniza-reg-in-progress');
+      }
+
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            full_name: displayName,
+            account_type: activatedUser.accountType,
+            phone: phone.trim(),
+            role: resolvedRole,
+            cargo: resolvedCargo,
+            education: resolvedEducation,
+            bio: resolvedBio,
+            experience: resolvedExperience,
+            neighborhood: accountType === 'candidate' ? neighborhood : undefined,
+            company_name: accountType === 'company' ? companyName.trim() : undefined,
+            cnpj: accountType === 'company' ? cnpj.trim() : undefined,
+            responsible_name: accountType === 'company' ? responsibleName.trim() : undefined,
+            company_segment: accountType === 'company' ? companySegment : undefined,
+            company_neighborhood: accountType === 'company' ? companyNeighborhood : undefined,
+            account_activated: true,
+            profile_completed: true,
+            requires_activation: false
+          }
+        });
+      } catch (metaErr) {
+        console.warn('Auth metadata update notice:', metaErr);
+      }
+
+      try {
+        await recordAuditLog({
+          actor_name: displayName,
+          actor_email: cleanTargetEmail,
+          actor_role: resolvedRole,
+          action: 'Ativação 2FA & Cadastro OAuth Concluído',
+          target_name: cleanTargetEmail,
+          target_type: 'security',
+          details: `Usuário ativado com código 2FA e perfil (${activatedUser.accountType}) concluído.`,
+          status: 'authorized'
+        });
+      } catch {}
+
+      setSuccess('Conta ativada e informações salvas com sucesso! Entrando...');
+      setTimeout(() => {
+        if (onLoginSuccess) {
+          onLoginSuccess(activatedUser);
+        }
+      }, 700);
+    } catch (err: any) {
+      setError('Erro ao concluir cadastro: ' + (err.message || 'Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -778,13 +1253,13 @@ export default function AuthScreen({
     setError(null);
     setSuccess(null);
 
-    if (regVerifyCodeInput.trim() !== sentRegCode && regVerifyCodeInput.trim() !== '000000') {
-      setError('Código de ativação incorreto. Verifique seu e-mail.');
+    const enteredCode = regVerifyCodeInput.trim();
+    if (enteredCode.length !== 6 || !sentRegCode || enteredCode !== sentRegCode) {
+      setError('Código de ativação incorreto. Verifique o código enviado no seu e-mail.');
       setLoading(false);
       return;
     }
 
-    // Obter o usuário atual da sessão
     const { data: { user: sessionUser } } = await supabase.auth.getUser();
 
     if (!sessionUser && !tempLoggedUser) {
@@ -794,24 +1269,113 @@ export default function AuthScreen({
       return;
     }
 
-    const userId = sessionUser?.id || tempLoggedUser?.id;
+    const userId = sessionUser?.id || tempLoggedUser?.id || 'usr-' + Date.now();
+    const baseUser: AppUser = {
+      ...(tempLoggedUser || {
+        name: sessionUser?.user_metadata?.full_name || email.split('@')[0] || 'Usuário',
+        email: sessionUser?.email || email
+      }),
+      id: userId,
+      email: (tempLoggedUser?.email || sessionUser?.email || email).trim().toLowerCase(),
+      status: 'active'
+    };
+    const cleanFinalEmail = baseUser.email.trim().toLowerCase();
 
     try {
-      // Atualizar status para ativo
-      await supabase
-        .from('users')
-        .update({ status: 'active' })
-        .eq('id', userId);
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('oportuniza-reg-in-progress');
+        localStorage.setItem(`oportuniza-activated-${cleanFinalEmail}`, 'true');
+        localStorage.setItem('oportuniza-current-user', JSON.stringify(baseUser));
+      }
+
+      const basePayload = {
+        id: userId,
+        name: baseUser.name,
+        email: cleanFinalEmail,
+        avatar_url: baseUser.avatarUrl || '',
+        phone: baseUser.phone || '',
+        bio: baseUser.bio || '',
+        education: baseUser.education || '',
+        experience: baseUser.experience || '',
+        skills: baseUser.skills || [],
+        updated_at: new Date().toISOString()
+      };
+
+      const fullPayload: Record<string, any> = {
+        ...basePayload,
+        status: 'active',
+        account_type: baseUser.accountType || 'candidate',
+        role: baseUser.role || 'Candidato',
+        cargo: baseUser.cargo || 'Estudante'
+      };
+
+      if (baseUser.accountType === 'company') {
+        fullPayload.company_name = baseUser.companyName || baseUser.name;
+        fullPayload.cnpj = baseUser.cnpj || '';
+        fullPayload.responsible_name = baseUser.responsibleName || baseUser.name;
+        fullPayload.company_segment = baseUser.companySegment || '';
+        fullPayload.company_neighborhood = baseUser.companyNeighborhood || '';
+      }
+
+      await upsertUserProfileSafely(fullPayload, basePayload);
+
+      if (baseUser.accountType === 'company') {
+        try {
+          await saveCompanyProfile({
+            user_id: userId,
+            company_name: baseUser.companyName || baseUser.name,
+            cnpj: baseUser.cnpj,
+            responsible_name: baseUser.responsibleName || baseUser.name,
+            responsible_role: 'RH / Proprietário',
+            email: cleanFinalEmail,
+            phone: baseUser.phone,
+            segment: baseUser.companySegment,
+            neighborhood: baseUser.companyNeighborhood,
+            status: 'active',
+            verified: false,
+            bio: baseUser.bio
+          });
+        } catch (compErr) {
+          console.warn('Company profile save warning:', compErr);
+        }
+      }
+
+      if (sessionUser) {
+        try {
+          await supabase.auth.updateUser({
+            data: {
+              account_activated: true,
+              profile_completed: true,
+              requires_activation: false
+            }
+          });
+        } catch (metaErr) {
+          console.warn('Auth metadata activation sync warning:', metaErr);
+        }
+      }
+
+      try {
+        await recordAuditLog({
+          actor_name: baseUser.name,
+          actor_email: cleanFinalEmail,
+          actor_role: baseUser.role || 'Candidato',
+          action: 'Ativação de Conta por E-mail',
+          target_name: cleanFinalEmail,
+          target_type: 'security',
+          details: `Cadastro ativado por código de 6 dígitos (${baseUser.accountType || 'candidate'}).`,
+          status: 'authorized'
+        });
+      } catch {}
 
       setSuccess('Conta ativada com sucesso! Bem-vindo ao Oportuniza.');
       
       setTimeout(() => {
         if (onLoginSuccess) {
-          onLoginSuccess(tempLoggedUser || { ... ({} as any), id: userId, email: sessionUser?.email || '' });
+          onLoginSuccess(baseUser);
         }
-      }, 1500);
+      }, 900);
     } catch (err: any) {
-      setError('Erro ao finalizar cadastro: ' + err.message);
+      setError('Erro ao finalizar cadastro: ' + (err.message || 'Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -823,7 +1387,8 @@ export default function AuthScreen({
     setError(null);
     setSuccess(null);
 
-    if (login2FACodeInput.trim() !== sentLogin2FACode && login2FACodeInput.trim() !== '000000') {
+    const entered = login2FACodeInput.trim();
+    if (entered.length !== 6 || !sentLogin2FACode || entered !== sentLogin2FACode) {
       setError('Código de verificação incorreto. Verifique seu e-mail.');
       setLoading(false);
       return;
@@ -842,18 +1407,21 @@ export default function AuthScreen({
       if (onLoginSuccess) {
         onLoginSuccess(pendingUser);
       }
-    }, 1200);
+    }, 900);
   };
 
   const triggerLogin2FA = async (userObj: AppUser) => {
     setPendingUser(userObj);
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setSentLogin2FACode(code);
+    setLogin2FACodeInput('');
     setIsVerifying2FA(true);
+    setError(null);
+    setSuccess(null);
     setLoading(false);
 
     try {
-      await fetch('/api/send-2fa-email', {
+      const res = await fetch('/api/send-2fa-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -862,9 +1430,15 @@ export default function AuthScreen({
           userName: userObj.name
         })
       });
-      setSuccess(`Código de segurança enviado para ${userObj.email}.`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.delivered) {
+        setSuccess(`Código de segurança enviado para ${userObj.email}.`);
+      } else {
+        setError('Não foi possível enviar o código 2FA por e-mail agora. Tente reenviar em instantes.');
+      }
     } catch (err) {
       console.warn("2FA email trigger warning:", err);
+      setError('Erro ao conectar com o servidor de e-mail para enviar o código 2FA.');
     }
   };
 
@@ -875,10 +1449,19 @@ export default function AuthScreen({
       {/* Spacer desktop reduzido */}
       <div className="hidden md:block h-4 w-full shrink-0" />
       
-      {onNavigate && (
+      {(onNavigate || onSignOut) && (
         <div className="p-4 pb-0 md:p-0 z-10 shrink-0">
           <button 
-            onClick={() => onNavigate('landing')}
+            type="button"
+            onClick={() => {
+              if (enforceVerificationUser && onSignOut) {
+                onSignOut();
+              } else if (onNavigate) {
+                onNavigate('landing');
+              } else if (onSignOut) {
+                onSignOut();
+              }
+            }}
             className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-sm w-fit hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors cursor-pointer text-slate-700 dark:text-slate-200 border border-slate-100 dark:border-slate-700"
           >
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-slate-300" />
@@ -896,7 +1479,437 @@ export default function AuthScreen({
           {/* Indicador visual simples no topo */}
           <div className="w-12 h-1 bg-gray-100 dark:bg-slate-700 rounded-full mx-auto mb-6 md:hidden" />
 
-          {verificationSent ? (
+          {enforceVerificationUser ? (
+            oauthStep === 'verify-code' ? (
+              <div className="animate-fadeIn text-center">
+                <div className="w-16 h-16 bg-[#52A8C7]/10 dark:bg-[#52A8C7]/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-[#52A8C7]/20">
+                  <ShieldCheckIcon className="w-8 h-8 text-[#52A8C7]" />
+                </div>
+
+                <span className="inline-block px-3 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200/80 dark:border-cyan-800 text-[10px] font-bold text-[#3d90ad] dark:text-[#52B4D8] uppercase tracking-wider mb-3">
+                  Ativação Obrigatória (2FA)
+                </span>
+
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                  Confirme seu Código 2FA
+                </h2>
+                <p className="text-gray-500 dark:text-slate-400 text-xs sm:text-sm mb-4 leading-relaxed">
+                  Para criar e ativar sua conta via Google/Social, digite o código de 6 dígitos enviado para:
+                </p>
+
+                <div className="mb-4 px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl inline-flex items-center gap-2 max-w-full">
+                  <span className="w-2 h-2 rounded-full bg-[#52A8C7] animate-pulse shrink-0" />
+                  <span className="text-slate-800 dark:text-slate-200 text-xs font-mono font-bold truncate select-all">
+                    {enforceVerificationUser.email}
+                  </span>
+                </div>
+
+                {oauthEmailStatus.sending ? (
+                  <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2 text-left">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#52A8C7] shrink-0" />
+                    <span>Enviando código 2FA para {enforceVerificationUser.email}...</span>
+                  </div>
+                ) : oauthEmailStatus.delivered === false ? (
+                  <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2 text-left">
+                    <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <span>{oauthEmailStatus.message}</span>
+                  </div>
+                ) : oauthEmailStatus.delivered ? (
+                  <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-xl text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2 text-left">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>{oauthEmailStatus.message}</span>
+                  </div>
+                ) : null}
+
+                <form onSubmit={handleVerifyOAuthCode} className="space-y-4">
+                  {error && (
+                    <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/50 rounded-xl flex items-start gap-2.5 text-red-600 dark:text-red-400 text-xs font-medium text-left">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{error}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                      Código de Ativação (6 dígitos)
+                    </label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <KeyRound className="w-5 h-5 text-slate-400 group-focus-within:text-[#52A8C7] transition-colors" />
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="000000"
+                        value={oauthCodeInput}
+                        onChange={(e) => {
+                          setOauthCodeInput(e.target.value.replace(/\D/g, ''));
+                          setError(null);
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/40 focus:border-[#52A8C7] transition-all text-base font-mono font-bold tracking-[0.25em] text-center text-slate-900 dark:text-white"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={oauthCodeInput.length < 6}
+                    className="w-full bg-[#52A8C7] hover:bg-[#3d90ad] text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-[#52A8C7]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    <span>Confirmar Código e Continuar</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </form>
+
+                <div className="mt-4 flex items-center justify-between text-xs px-1">
+                  <button
+                    type="button"
+                    onClick={() => dispatchOAuthCode(enforceVerificationUser)}
+                    disabled={oauthTimer > 0 || oauthEmailStatus.sending}
+                    className={`font-bold flex items-center gap-1.5 cursor-pointer ${
+                      oauthTimer > 0 || oauthEmailStatus.sending
+                        ? 'text-slate-400 cursor-not-allowed'
+                        : 'text-[#52A8C7] dark:text-[#52B4D8] hover:underline'
+                    }`}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${oauthEmailStatus.sending ? 'animate-spin' : ''}`} />
+                    <span>Reenviar código</span>
+                  </button>
+                  <span className="font-mono text-slate-400">
+                    {oauthTimer > 0 ? `Aguarde ${oauthTimer}s` : 'Pronto para reenviar'}
+                  </span>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onSignOut) onSignOut();
+                      else if (onNavigate) onNavigate('landing');
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-semibold inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Cancelar e Voltar ao Início</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="animate-fadeIn">
+                <div className="text-center mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
+                    Complete suas Informações
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+                    E-mail verificado! Preencha os dados do seu perfil para entrar no portal.
+                  </p>
+                  <div className="mt-2.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-full inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 max-w-full">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{enforceVerificationUser.email}</span>
+                  </div>
+                </div>
+
+                <div className="mb-4 p-1 bg-slate-100 dark:bg-slate-900/90 rounded-2xl flex flex-wrap gap-1 border border-slate-200/70 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountType('candidate');
+                      setError(null);
+                    }}
+                    className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                      accountType === 'candidate'
+                        ? 'bg-white dark:bg-slate-800 text-[#52A8C7] dark:text-[#52B4D8] shadow-xs border border-slate-200/60 dark:border-slate-700'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>Sou Candidato</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountType('company');
+                      setError(null);
+                    }}
+                    className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                      accountType === 'company'
+                        ? 'bg-white dark:bg-slate-800 text-[#52A8C7] dark:text-[#52B4D8] shadow-xs border border-slate-200/60 dark:border-slate-700'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span>Sou Empresa</span>
+                  </button>
+                </div>
+
+                {accountType === 'company' && (
+                  <div className="mb-3 p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/70 rounded-2xl text-xs text-slate-800 dark:text-slate-200 flex items-start gap-2.5">
+                    <Sparkles className="w-4 h-4 text-[#52A8C7] dark:text-[#52B4D8] shrink-0 mt-0.5" />
+                    <div className="space-y-0.5 text-left">
+                      <strong className="block font-bold text-slate-900 dark:text-white text-xs">Oportuniza para Empresas</strong>
+                      <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
+                        Cadastre seu negócio em Araucária para anunciar vagas gratuitamente.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleCompleteOAuthProfile} className="space-y-3">
+                  {error && (
+                    <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-100 dark:border-red-900 rounded-xl flex items-start gap-2 text-red-600 dark:text-red-300 text-xs font-medium text-left">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{error}</span>
+                    </div>
+                  )}
+                  {success && (
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900 rounded-xl flex items-start gap-2 text-emerald-600 dark:text-emerald-300 text-xs font-medium text-left">
+                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{success}</span>
+                    </div>
+                  )}
+
+                  {accountType === 'candidate' ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Nome Completo <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative group flex items-center">
+                          <User className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 group-focus-within:text-[#52A8C7] transition-colors" />
+                          <input
+                            type="text"
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            required
+                            placeholder="Seu nome completo"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          WhatsApp <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative group flex items-center">
+                          <Phone className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 group-focus-within:text-[#52A8C7] transition-colors" />
+                          <input
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => handlePhoneChange(e.target.value)}
+                            required
+                            placeholder="(41) 99999-9999"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Bairro em Araucária
+                        </label>
+                        <div className="relative group flex items-center">
+                          <MapPin className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
+                          <select
+                            value={neighborhood}
+                            onChange={(e) => setNeighborhood(e.target.value)}
+                            className="w-full pl-10 pr-8 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white cursor-pointer appearance-none"
+                          >
+                            {ARAUCARIA_NEIGHBORHOODS.map((n) => (
+                              <option key={n} value={n} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">{n}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-3.5 pointer-events-none text-slate-400 text-xs">▼</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Escolaridade
+                        </label>
+                        <div className="relative group flex items-center">
+                          <GraduationCap className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
+                          <select
+                            value={education}
+                            onChange={(e) => setEducation(e.target.value)}
+                            className="w-full pl-10 pr-8 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white cursor-pointer appearance-none"
+                          >
+                            {EDUCATION_OPTIONS.map((ed) => (
+                              <option key={ed} value={ed} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">{ed}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-3.5 pointer-events-none text-slate-400 text-xs">▼</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Razão Social ou Nome Fantasia <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative group flex items-center">
+                          <Building2 className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 group-focus-within:text-[#52A8C7] transition-colors" />
+                          <input
+                            type="text"
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
+                            required
+                            placeholder="Ex: Supermercado Araucária Ltda"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          CNPJ <span className="text-[10px] text-slate-400 font-normal lowercase">(opcional)</span>
+                        </label>
+                        <div className="relative group flex items-center">
+                          <FileText className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 group-focus-within:text-[#52A8C7] transition-colors" />
+                          <input
+                            type="text"
+                            value={cnpj}
+                            onChange={(e) => handleCnpjChange(e.target.value)}
+                            placeholder="00.000.000/0000-00"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Responsável / RH <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative group flex items-center">
+                          <User className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 group-focus-within:text-[#52A8C7] transition-colors" />
+                          <input
+                            type="text"
+                            value={responsibleName}
+                            onChange={(e) => setResponsibleName(e.target.value)}
+                            required
+                            placeholder="Ex: Ana Silva (Recrutamento)"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Segmento de Atuação
+                        </label>
+                        <div className="relative group flex items-center">
+                          <Briefcase className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
+                          <select
+                            value={companySegment}
+                            onChange={(e) => setCompanySegment(e.target.value)}
+                            className="w-full pl-10 pr-8 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white cursor-pointer appearance-none"
+                          >
+                            {COMPANY_SEGMENTS.map((s) => (
+                              <option key={s} value={s} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">{s}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-3.5 pointer-events-none text-slate-400 text-xs">▼</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          Bairro em Araucária
+                        </label>
+                        <div className="relative group flex items-center">
+                          <MapPin className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
+                          <select
+                            value={companyNeighborhood}
+                            onChange={(e) => setCompanyNeighborhood(e.target.value)}
+                            className="w-full pl-10 pr-8 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white cursor-pointer appearance-none"
+                          >
+                            {ARAUCARIA_NEIGHBORHOODS.map((n) => (
+                              <option key={n} value={n} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">{n}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-3.5 pointer-events-none text-slate-400 text-xs">▼</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
+                          WhatsApp Comercial / RH <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative group flex items-center">
+                          <Phone className="absolute left-3.5 w-4 h-4 text-slate-400 dark:text-slate-500 group-focus-within:text-[#52A8C7] transition-colors" />
+                          <input
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => handlePhoneChange(e.target.value)}
+                            required
+                            placeholder="(41) 99999-9999"
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] text-xs sm:text-sm font-semibold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2 px-1 text-left">
+                    <label className="flex items-start gap-2.5 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={lgpdAccepted}
+                        onChange={(e) => setLgpdAccepted(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 rounded border-slate-300 dark:border-slate-700 text-[#52A8C7] focus:ring-[#52A8C7] bg-white dark:bg-slate-950 cursor-pointer shrink-0"
+                      />
+                      <span className="text-xs text-slate-600 dark:text-slate-300 leading-tight font-medium select-none">
+                        Li e aceito os{' '}
+                        <button
+                          type="button"
+                          onClick={() => setShowLgpdModal(true)}
+                          className="text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer inline"
+                        >
+                          Termos de Uso e LGPD
+                        </button>.
+                      </span>
+                    </label>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-[#52A8C7] hover:bg-[#3d90ad] text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-blue-500/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer mt-2 text-sm disabled:opacity-60"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <span>Concluir Cadastro e Entrar</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onSignOut) onSignOut();
+                      else if (onNavigate) onNavigate('landing');
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-semibold inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Cancelar e Voltar ao Início</span>
+                  </button>
+                </div>
+              </div>
+            )
+          ) : verificationSent ? (
             <div className="flex flex-col items-center text-center animate-fadeIn py-2">
               <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-6 relative shadow-inner">
                 <div className="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-25" />
@@ -1150,9 +2163,16 @@ export default function AuthScreen({
                   </div>
 
                   <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Verifique seu e-mail</h2>
-                  <p className="text-gray-500 dark:text-slate-400 text-sm mb-6 leading-relaxed">
+                  <p className="text-gray-500 dark:text-slate-400 text-sm mb-4 leading-relaxed">
                     Enviamos um código de ativação para <strong className="text-gray-900 dark:text-white font-semibold">{email}</strong>.
                   </p>
+
+                  {regEmailStatus.delivered === false && regEmailStatus.message && (
+                    <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-start gap-2 text-amber-800 dark:text-amber-200 text-xs text-left">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                      <span>{regEmailStatus.message}</span>
+                    </div>
+                  )}
 
                   <form onSubmit={handleVerifyRegistration} className="space-y-4">
                     {error && (
@@ -1162,13 +2182,13 @@ export default function AuthScreen({
                       </div>
                     )}
                     {success && (
-                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 rounded-xl flex items-start gap-2.5 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
-                        <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 rounded-xl flex items-start gap-2.5 text-emerald-600 dark:text-emerald-400 text-xs font-medium text-left">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                         <span>{success}</span>
                       </div>
                     )}
 
-                    <div className="space-y-2">
+                    <div className="space-y-2 text-left">
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Código de Ativação</label>
                       <div className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -1176,10 +2196,14 @@ export default function AuthScreen({
                         </div>
                         <input 
                           type="text"
+                          inputMode="numeric"
                           maxLength={6}
                           placeholder="Digite os 6 dígitos"
                           value={regVerifyCodeInput}
-                          onChange={(e) => setRegVerifyCodeInput(e.target.value.replace(/\D/g, ''))}
+                          onChange={(e) => {
+                            setRegVerifyCodeInput(e.target.value.replace(/\D/g, ''));
+                            setError(null);
+                          }}
                           className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/50 focus:border-[#52A8C7] transition-all text-sm font-bold tracking-[0.2em] text-center"
                           required
                         />
@@ -1200,11 +2224,38 @@ export default function AuthScreen({
                         </>
                       )}
                     </button>
+
+                    <div className="flex items-center justify-between text-xs px-1">
+                      <button
+                        type="button"
+                        onClick={handleResendRegCode}
+                        disabled={regTimer > 0 || regEmailStatus.sending}
+                        className={`font-bold flex items-center gap-1.5 cursor-pointer ${
+                          regTimer > 0 || regEmailStatus.sending
+                            ? 'text-slate-400 cursor-not-allowed'
+                            : 'text-[#52A8C7] dark:text-[#52B4D8] hover:underline'
+                        }`}
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${regEmailStatus.sending ? 'animate-spin' : ''}`} />
+                        <span>Reenviar código</span>
+                      </button>
+                      <span className="font-mono text-slate-400">
+                        {regTimer > 0 ? `Aguarde ${regTimer}s` : 'Pronto para reenviar'}
+                      </span>
+                    </div>
                     
                     <button 
                       type="button"
-                      onClick={() => setIsVerifyingReg(false)}
-                      className="w-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold py-2 block hover:underline"
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          sessionStorage.removeItem('oportuniza-reg-in-progress');
+                        }
+                        setIsVerifyingReg(false);
+                        setRegVerifyCodeInput('');
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                      className="w-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold py-2 block hover:underline cursor-pointer"
                     >
                       Voltar e corrigir e-mail
                     </button>
@@ -1743,7 +2794,7 @@ export default function AuthScreen({
                       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                       <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4B4B"/>
                     </svg>
-                    <span>Entrar com Google</span>
+                    <span>{isLogin ? 'Entrar com Google' : 'Cadastrar com Google'}</span>
                   </button>
 
                   <button 
@@ -1755,7 +2806,7 @@ export default function AuthScreen({
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
                     </svg>
-                    <span>Entrar com GitHub</span>
+                    <span>{isLogin ? 'Entrar com GitHub' : 'Cadastrar com GitHub'}</span>
                   </button>
                 </form>
               )}
@@ -1764,6 +2815,7 @@ export default function AuthScreen({
                 <div className="mt-6 text-center">
                   {isRecover ? (
                     <button 
+                      type="button"
                       onClick={() => setIsRecover(false)}
                       className="text-[#52A8C7] dark:text-[#52B4D8] text-xs font-bold hover:underline cursor-pointer"
                     >
@@ -1772,14 +2824,16 @@ export default function AuthScreen({
                   ) : (
                     <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-500 dark:text-slate-400">
                       <button 
+                        type="button"
                         onClick={toggleTheme}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                         title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
                       >
                         {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
                       </button>
                       <span>{isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}</span>
                       <button 
+                        type="button"
                         onClick={() => setIsLogin(!isLogin)}
                         className="text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer"
                       >
