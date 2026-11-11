@@ -230,7 +230,7 @@ export default function TwoFactorAuthScreen({
       return;
     }
 
-    const cleanCode = codeToVerify.trim();
+    const cleanCode = codeToVerify.replace(/\D/g, '').slice(0, 8);
     if (cleanCode.length !== 8) {
       setErrorMsg('Digite todos os 8 dígitos do código enviado para o seu e-mail.');
       return;
@@ -243,14 +243,26 @@ export default function TwoFactorAuthScreen({
     let verifiedUserId = user.id || '';
 
     if (deliveryMethod === 'supabase-otp') {
-      const otpCheck = await verifySupabaseOtpCode(user.email, cleanCode);
+      const otpCheck = await verifySupabaseOtpCode(user.email, cleanCode, ['email'], {
+        preserveCurrentSession: true
+      });
       if (otpCheck.verified) {
         isMatch = true;
         if (otpCheck.userId) {
           verifiedUserId = otpCheck.userId;
         }
       } else {
-        await registerFailedAttempt(otpCheck.error || 'Código 2FA incorreto ou expirado. Confira o e-mail e tente novamente.');
+        if (otpCheck.errorKind === 'timeout' || otpCheck.errorKind === 'rate-limit') {
+          setIsVerifying(false);
+          setErrorMsg(otpCheck.error || 'Erro temporário ao validar código. Tente confirmar novamente.');
+          return;
+        }
+        const remaining = MAX_2FA_ATTEMPTS - (failedAttempts + 1);
+        const msg =
+          remaining > 0 && otpCheck.error
+            ? `${otpCheck.error} (Restam ${remaining} ${remaining === 1 ? 'tentativa' : 'tentativas'}).`
+            : otpCheck.error;
+        await registerFailedAttempt(msg || 'Código 2FA incorreto ou expirado. Confira o e-mail e tente novamente.');
         return;
       }
     } else if (serverVerifiedChallenge && challengeId) {

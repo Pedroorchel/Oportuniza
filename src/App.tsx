@@ -497,9 +497,8 @@ export default function App() {
 
     // Supabase Auth Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Skip profile re-fetch on USER_UPDATED events to avoid race conditions with active saves
-      if (event === 'USER_UPDATED') {
-        console.log("Auth event: USER_UPDATED. Skipping full profile re-fetch to avoid race conditions.");
+      // Skip profile re-fetch on USER_UPDATED / TOKEN_REFRESHED events to avoid race conditions with active 2FA or saves
+      if (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
         return;
       }
 

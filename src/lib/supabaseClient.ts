@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ckzygdwhihybrdzctdup.supabase.co';
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QHYzyrfocbKo60XS5EFYBA_Js8u-l0O';
+const rawUrl = import.meta.env?.VITE_SUPABASE_URL || 'https://ckzygdwhihybrdzctdup.supabase.co';
+const rawKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QHYzyrfocbKo60XS5EFYBA_Js8u-l0O';
 
 // Sanitize URL to ensure standard Supabase base URL format (without /rest/v1 or trailing slashes)
 const supabaseUrl = rawUrl
@@ -62,6 +62,21 @@ export const supabase = createClient(
     }
   }
 );
+
+// Non-persisting client for isolated 2FA OTP checks without overwriting active Google/OAuth sessions
+export function createEphemeralSupabaseClient() {
+  return createClient(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      }
+    }
+  );
+}
 
 // Helper to get the full base URL including subpath (e.g. /oportunizae/ on GitHub Pages)
 export function getAppRedirectUrl(): string {

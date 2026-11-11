@@ -185,6 +185,7 @@ export default function AuthScreen({
   const [oauthDeliveryMethod, setOauthDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
   const [oauthEmailStatus, setOauthEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
   const oauthDispatchedEmailRef = useRef<string | null>(null);
+  const oauthDispatchSeqRef = useRef(0);
 
   const signupPasswordStrength = !isLogin && !isRecover && password ? validatePasswordStrength(password, email) : null;
   const recoveryPasswordStrength = isRecover && recoveryStep === 'new-password' && newPassword ? validatePasswordStrength(newPassword, email) : null;
@@ -494,7 +495,7 @@ export default function AuthScreen({
           return;
         }
 
-        const cleanCode = recoveryCodeInput.trim();
+        const cleanCode = recoveryCodeInput.replace(/\D/g, '').slice(0, 8);
         if (cleanCode.length !== 8) {
           setError('Por favor, informe os 8 dígitos enviados para seu e-mail.');
           setLoading(false);
@@ -505,10 +506,15 @@ export default function AuthScreen({
           if (typeof window !== 'undefined') {
             sessionStorage.setItem('oportuniza-recovery-in-progress', cleanRecEmail);
           }
-          const otpCheck = await verifySupabaseOtpCode(cleanRecEmail, cleanCode, ['email', 'magiclink', 'recovery']);
+          const otpCheck = await verifySupabaseOtpCode(cleanRecEmail, cleanCode, ['email', 'recovery']);
           if (!otpCheck.verified) {
             if (typeof window !== 'undefined') {
               sessionStorage.removeItem('oportuniza-recovery-in-progress');
+            }
+            if (otpCheck.errorKind === 'timeout' || otpCheck.errorKind === 'rate-limit') {
+              setError(otpCheck.error || 'Erro temporário ao validar código. Tente novamente em instantes.');
+              setLoading(false);
+              return;
             }
             const nextFails = recoveryFailedAttempts + 1;
             setRecoveryFailedAttempts(nextFails);
@@ -516,7 +522,7 @@ export default function AuthScreen({
             setError(
               nextFails >= 5
                 ? 'Código bloqueado após 5 tentativas incorretas. Volte e solicite um novo código.'
-                : `Código de recuperação incorreto ou expirado. Restam ${5 - nextFails} tentativa(s).`
+                : `${otpCheck.error || 'Código de recuperação incorreto ou expirado.'} Restam ${5 - nextFails} tentativa(s).`
             );
             setLoading(false);
             return;
@@ -1142,7 +1148,8 @@ export default function AuthScreen({
           regDispatchLockRef.current = { email: cleanEmail, at: nowTs };
           setRegDeliveryMethod('smtp');
           setRegEmailStatus({ sending: true });
-          const mailResult = await sendActivationCodeEmail(cleanEmail, registrationCode, newUser.name);
+          const alreadyDispatchedSignupOtp = Boolean(signUpData?.user && !signUpData?.session);
+          const mailResult = await sendActivationCodeEmail(cleanEmail, registrationCode, newUser.name, alreadyDispatchedSignupOtp);
           if (mailResult.deliveryMethod) {
             setRegDeliveryMethod(mailResult.deliveryMethod);
           }
@@ -1184,14 +1191,16 @@ export default function AuthScreen({
   async function sendActivationCodeEmail(
     targetEmail: string,
     codeToSend: string,
-    targetName: string
+    targetName: string,
+    alreadyDispatchedSignupOtp = false
   ) {
     return await sendVerificationCodeEmail({
       email: targetEmail,
       code: codeToSend,
       userName: targetName,
       kind: 'registration',
-      accountType
+      accountType,
+      alreadyDispatchedSignupOtp
     });
   }
 
@@ -1229,6 +1238,7 @@ export default function AuthScreen({
     const cleanTargetEmail = (targetUser.email || '').trim().toLowerCase();
     if (!cleanTargetEmail) return;
 
+    const seq = ++oauthDispatchSeqRef.current;
     const code = generateSecureOtpCode();
     setOauthSentCode(code);
     setOauthChallengeId(null);
@@ -1251,6 +1261,8 @@ export default function AuthScreen({
         isAdmin: Boolean(targetUser.isAdmin),
         accountType: targetUser.accountType
       });
+
+      if (seq !== oauthDispatchSeqRef.current) return;
 
       if (res.deliveryMethod) {
         setOauthDeliveryMethod(res.deliveryMethod);
@@ -1277,6 +1289,7 @@ export default function AuthScreen({
         });
       }
     } catch (err: any) {
+      if (seq !== oauthDispatchSeqRef.current) return;
       setOauthTimer(0);
       setOauthEmailStatus({
         sending: false,
@@ -1293,6 +1306,14 @@ export default function AuthScreen({
     }
 
     const cleanTargetEmail = (enforceVerificationUser.email || '').trim().toLowerCase();
+    if (!cleanTargetEmail) return;
+
+    // Do not reset active verification step/input/errors if same pending user re-renders
+    if (oauthDispatchedEmailRef.current === cleanTargetEmail) {
+      return;
+    }
+    oauthDispatchedEmailRef.current = cleanTargetEmail;
+
     setEmail(cleanTargetEmail);
     setRegisteredEmail(cleanTargetEmail);
     setVerificationSent(false);
@@ -1322,10 +1343,6 @@ export default function AuthScreen({
       handlePhoneChange(enforceVerificationUser.phone);
     }
 
-    if (oauthDispatchedEmailRef.current === cleanTargetEmail) {
-      return;
-    }
-    oauthDispatchedEmailRef.current = cleanTargetEmail;
     dispatchOAuthCode(enforceVerificationUser);
   }, [enforceVerificationUser]);
 
@@ -1404,7 +1421,7 @@ export default function AuthScreen({
       return;
     }
 
-    const entered = oauthCodeInput.trim();
+    const entered = oauthCodeInput.replace(/\D/g, '').slice(0, 8);
     if (entered.length !== 8) {
       setError('Digite os 8 dígitos do código de ativação enviado para o seu e-mail.');
       return;
@@ -1414,16 +1431,22 @@ export default function AuthScreen({
 
     if (oauthDeliveryMethod === 'supabase-otp') {
       setLoading(true);
-      const otpCheck = await verifySupabaseOtpCode(targetEmail, entered, ['email', 'magiclink', 'signup']);
+      const otpCheck = await verifySupabaseOtpCode(targetEmail, entered, ['email'], {
+        preserveCurrentSession: true
+      });
       setLoading(false);
       if (!otpCheck.verified) {
+        if (otpCheck.errorKind === 'timeout' || otpCheck.errorKind === 'rate-limit') {
+          setError(otpCheck.error || 'Erro temporário ao validar o código. Tente confirmar novamente.');
+          return;
+        }
         const nextFails = oauthFailedAttempts + 1;
         setOauthFailedAttempts(nextFails);
         setOauthCodeInput('');
         setError(
           nextFails >= 5
             ? 'Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".'
-            : `Código de ativação incorreto ou expirado. Restam ${5 - nextFails} tentativa(s).`
+            : `${otpCheck.error || 'Código de ativação incorreto ou expirado.'} Restam ${5 - nextFails} tentativa(s).`
         );
         return;
       }
@@ -1720,7 +1743,7 @@ export default function AuthScreen({
     setSuccess(null);
 
     const targetEmailCheck = (tempLoggedUser?.email || email).trim().toLowerCase();
-    const enteredCode = regVerifyCodeInput.trim();
+    const enteredCode = regVerifyCodeInput.replace(/\D/g, '').slice(0, 8);
     if (enteredCode.length !== 8) {
       setError('Digite todos os 8 dígitos do código enviado para seu e-mail.');
       setLoading(false);
@@ -1729,15 +1752,20 @@ export default function AuthScreen({
 
     let verifiedSessionUserId: string | undefined;
     if (regDeliveryMethod === 'supabase-otp') {
-      const otpCheck = await verifySupabaseOtpCode(targetEmailCheck, enteredCode, ['signup', 'email', 'magiclink']);
+      const otpCheck = await verifySupabaseOtpCode(targetEmailCheck, enteredCode, ['signup', 'email']);
       if (!otpCheck.verified) {
+        if (otpCheck.errorKind === 'timeout' || otpCheck.errorKind === 'rate-limit') {
+          setError(otpCheck.error || 'Erro temporário ao validar código. Tente novamente.');
+          setLoading(false);
+          return;
+        }
         const nextFails = regFailedAttempts + 1;
         setRegFailedAttempts(nextFails);
         setRegVerifyCodeInput('');
         setError(
           nextFails >= 5
             ? 'Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".'
-            : `Código de ativação incorreto ou expirado. Restam ${5 - nextFails} tentativa(s).`
+            : `${otpCheck.error || 'Código de ativação incorreto ou expirado.'} Restam ${5 - nextFails} tentativa(s).`
         );
         setLoading(false);
         return;
@@ -2002,11 +2030,12 @@ export default function AuthScreen({
                       <input
                         type="text"
                         inputMode="numeric"
-                        maxLength={8}
+                        autoComplete="one-time-code"
+                        maxLength={24}
                         placeholder="00000000"
                         value={oauthCodeInput}
                         onChange={(e) => {
-                          setOauthCodeInput(e.target.value.replace(/\D/g, ''));
+                          setOauthCodeInput(e.target.value.replace(/\D/g, '').slice(0, 8));
                           setError(null);
                         }}
                         className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/40 focus:border-[#52A8C7] transition-all text-base font-mono font-bold tracking-[0.2em] text-center text-slate-900 dark:text-white"
@@ -2665,11 +2694,12 @@ export default function AuthScreen({
                         <input 
                           type="text"
                           inputMode="numeric"
-                          maxLength={8}
+                          autoComplete="one-time-code"
+                          maxLength={24}
                           placeholder="Digite os 8 dígitos"
                           value={regVerifyCodeInput}
                           onChange={(e) => {
-                            setRegVerifyCodeInput(e.target.value.replace(/\D/g, ''));
+                            setRegVerifyCodeInput(e.target.value.replace(/\D/g, '').slice(0, 8));
                             setError(null);
                           }}
                           className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/50 focus:border-[#52A8C7] transition-all text-sm font-mono font-bold tracking-[0.18em] text-center"
@@ -2991,9 +3021,10 @@ export default function AuthScreen({
                           <input 
                             type="text"
                             inputMode="numeric"
-                            maxLength={8}
+                            autoComplete="one-time-code"
+                            maxLength={24}
                             value={recoveryCodeInput}
-                            onChange={(e) => setRecoveryCodeInput(e.target.value.replace(/\D/g, ''))}
+                            onChange={(e) => setRecoveryCodeInput(e.target.value.replace(/\D/g, '').slice(0, 8))}
                             required
                             placeholder="Digite os 8 dígitos"
                             className="w-full pl-10 pr-4 py-3.5 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] focus:bg-white dark:focus:bg-slate-900 transition-all text-base font-mono font-black tracking-widest text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-xs text-center"

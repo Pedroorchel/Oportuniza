@@ -238,6 +238,61 @@ const ADMIN_FALLBACK_SHA256 = "ae2cd42eebcc662cea2170ed524f8f50481f40c6b9bc5380a
 
 let failedSmtpAuthCache: { signature: string; at: number } | null = null;
 const SMTP_AUTH_FAIL_CACHE_MS = 5 * 60 * 1000;
+type SmtpTransporter = ReturnType<typeof nodemailer.createTransport>;
+const smtpTransporterPool = new Map<string, SmtpTransporter>();
+
+function resetSmtpTransporterPool(specificKey?: string) {
+  if (specificKey) {
+    const existing = smtpTransporterPool.get(specificKey);
+    if (existing) {
+      try { existing.close(); } catch {}
+      smtpTransporterPool.delete(specificKey);
+    }
+    return;
+  }
+  for (const [k, transporter] of smtpTransporterPool.entries()) {
+    try { transporter.close(); } catch {}
+    smtpTransporterPool.delete(k);
+  }
+}
+
+function getPooledSmtpTransporter(
+  cfg: { smtpHost: string; smtpUser: string; smtpPass: string },
+  attempt: { port: number; secure: boolean; requireTLS?: boolean }
+): { key: string; transporter: SmtpTransporter } {
+  const signature = getSmtpSignature(cfg);
+  const key = `${signature}:${attempt.port}`;
+
+  // Purge stale entries from outdated credentials
+  for (const existingKey of Array.from(smtpTransporterPool.keys())) {
+    if (!existingKey.startsWith(`${signature}:`)) {
+      resetSmtpTransporterPool(existingKey);
+    }
+  }
+
+  let transporter = smtpTransporterPool.get(key);
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host: cfg.smtpHost,
+      port: attempt.port,
+      secure: attempt.secure,
+      requireTLS: attempt.requireTLS,
+      pool: true,
+      maxConnections: 3,
+      maxMessages: 50,
+      connectionTimeout: 4500,
+      greetingTimeout: 4500,
+      socketTimeout: 8000,
+      auth: {
+        user: cfg.smtpUser,
+        pass: cfg.smtpPass,
+      },
+    });
+    smtpTransporterPool.set(key, transporter);
+  }
+
+  return { key, transporter };
+}
 
 function getSmtpConfig() {
   const smtpUser = (process.env.SMTP_USER || process.env.GMAIL_USER || "oportunizahw@gmail.com").trim();
@@ -320,21 +375,8 @@ async function sendSmtpMail(options: {
 
   let lastError: any = null;
   for (const cfgAttempt of attempts) {
+    const { key: poolKey, transporter } = getPooledSmtpTransporter(cfg, cfgAttempt);
     try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: cfgAttempt.port,
-        secure: cfgAttempt.secure,
-        requireTLS: (cfgAttempt as any).requireTLS,
-        connectionTimeout: 3500,
-        greetingTimeout: 3500,
-        socketTimeout: 6000,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-
       await transporter.sendMail({
         from: `"${safeFromLabel}" <${smtpUser}>`,
         to: safeTo,
@@ -346,6 +388,7 @@ async function sendSmtpMail(options: {
       return { delivered: true, smtpUser };
     } catch (err: any) {
       lastError = err;
+      resetSmtpTransporterPool(poolKey);
       console.warn(`SMTP attempt on port ${cfgAttempt.port} failed for ${safeTo}:`, err?.message || err);
       if (isSmtpAuthError(err)) {
         failedSmtpAuthCache = { signature, at: Date.now() };
@@ -718,7 +761,7 @@ app.post("/api/verify-security-code", verifyRateLimit, (req: any, res: any) => {
   sweepSecurityStores();
   const challengeId = String(req.body?.challengeId || '').trim();
   const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
-  const cleanCode = String(req.body?.code || '').trim();
+  const cleanCode = String(req.body?.code || '').replace(/\D/g, '');
   const expectedKind = req.body?.kind ? String(req.body.kind).trim() : undefined;
 
   if (!challengeId || !cleanEmail || cleanCode.length !== 8 || !/^\d{8}$/.test(cleanCode)) {
