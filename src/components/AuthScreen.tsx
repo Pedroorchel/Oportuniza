@@ -1,22 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, getAppRedirectUrl } from '../lib/supabaseClient';
-import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from '../lib/blockedAccounts';
+import {
+  isAccountBlocked,
+  isUserRecordBlocked,
+  fetchAccountBlockReason,
+  extractBlockReasonFromRecord,
+  checkEmailRegisteredOrBlocked
+} from '../lib/blockedAccounts';
 import { saveCompanyProfile } from '../lib/companyService';
 import { Mail, Lock, User, ArrowRight, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, ShieldAlert, Building2, Briefcase, Phone, MapPin, FileText, Sparkles, Headphones, KeyRound, CheckCircle2, Moon, Sun, RefreshCw, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ScreenId, User as AppUser } from '../types';
-import { validateEmailAddress, validatePersonOrCompanyName, validateCnpj, containsOffensiveLanguage, validatePhoneNumber } from '../lib/securityValidation';
+import {
+  validateEmailAddress,
+  validatePersonOrCompanyName,
+  validateCnpj,
+  containsOffensiveLanguage,
+  validatePhoneNumber,
+  validatePasswordStrength,
+  generateSecureOtpCode,
+  verifyAdminAccessCodeClient,
+  verifyStoredPasswordClient,
+  hashPasswordForStorageClient
+} from '../lib/securityValidation';
 import { COMPANY_LGPD_DECLARATION_SUMMARY, COMPANY_LGPD_CLAUSES } from '../lib/companyLGPD';
 import { recordAuditLog } from '../lib/auditLogService';
 import { ShieldCheck as ShieldCheckIcon } from 'lucide-react';
 import { useTheme } from '../lib/theme';
 import {
   sendVerificationCodeEmail,
+  verifyServerSecurityCode,
   verifySupabaseOtpCode,
   buildApiEndpoint,
+  shouldSkipApiEmailProbe,
+  markApiEmailProbeUnavailable,
   VerificationDeliveryMethod
 } from '../lib/emailVerificationService';
 import {
+  buildSessionRoleSignature,
   markSession2FAVerified,
   clearSession2FAVerification
 } from '../lib/twoFactorSession';
@@ -117,10 +138,23 @@ export default function AuthScreen({
   const [registeredEmail, setRegisteredEmail] = useState('');
   const [resendLoading, setResendLoading] = useState(false);
 
+  // Security brute-force protection states
+  const [loginFailedAttempts, setLoginFailedAttempts] = useState(0);
+  const [loginLockoutUntil, setLoginLockoutUntil] = useState(0);
+  const [adminFailedAttempts, setAdminFailedAttempts] = useState(0);
+  const [adminLockoutUntil, setAdminLockoutUntil] = useState(0);
+
   // Recovery 3-step state: 'request' | 'verify-code' | 'new-password'
   const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify-code' | 'new-password'>('request');
   const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
   const [sentRecoveryCode, setSentRecoveryCode] = useState('');
+  const [recoveryChallengeId, setRecoveryChallengeId] = useState<string | null>(null);
+  const [recoveryServerVerified, setRecoveryServerVerified] = useState(false);
+  const [recoveryDeliveryMethod, setRecoveryDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
+  const [recoveryResetToken, setRecoveryResetToken] = useState<string | null>(null);
+  const [recoveryExpiresAt, setRecoveryExpiresAt] = useState<number>(Date.now() + 10 * 60 * 1000);
+  const [recoveryFailedAttempts, setRecoveryFailedAttempts] = useState(0);
+  const [recoveryHasSupabaseSession, setRecoveryHasSupabaseSession] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -129,6 +163,10 @@ export default function AuthScreen({
   const [isVerifyingReg, setIsVerifyingReg] = useState(false);
   const [regVerifyCodeInput, setRegVerifyCodeInput] = useState('');
   const [sentRegCode, setSentRegCode] = useState('');
+  const [regChallengeId, setRegChallengeId] = useState<string | null>(null);
+  const [regServerVerified, setRegServerVerified] = useState(false);
+  const [regExpiresAt, setRegExpiresAt] = useState<number>(Date.now() + 10 * 60 * 1000);
+  const [regFailedAttempts, setRegFailedAttempts] = useState(0);
   const [tempLoggedUser, setTempLoggedUser] = useState<AppUser | null>(null);
   const [regTimer, setRegTimer] = useState(0);
   const [regDeliveryMethod, setRegDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
@@ -139,10 +177,17 @@ export default function AuthScreen({
   const [oauthStep, setOauthStep] = useState<'verify-code' | 'complete-info'>('verify-code');
   const [oauthCodeInput, setOauthCodeInput] = useState('');
   const [oauthSentCode, setOauthSentCode] = useState('');
+  const [oauthChallengeId, setOauthChallengeId] = useState<string | null>(null);
+  const [oauthServerVerified, setOauthServerVerified] = useState(false);
+  const [oauthExpiresAt, setOauthExpiresAt] = useState<number>(Date.now() + 10 * 60 * 1000);
+  const [oauthFailedAttempts, setOauthFailedAttempts] = useState(0);
   const [oauthTimer, setOauthTimer] = useState(0);
   const [oauthDeliveryMethod, setOauthDeliveryMethod] = useState<VerificationDeliveryMethod>('smtp');
   const [oauthEmailStatus, setOauthEmailStatus] = useState<{ sending: boolean; delivered?: boolean; message?: string }>({ sending: false });
   const oauthDispatchedEmailRef = useRef<string | null>(null);
+
+  const signupPasswordStrength = !isLogin && !isRecover && password ? validatePasswordStrength(password, email) : null;
+  const recoveryPasswordStrength = isRecover && recoveryStep === 'new-password' && newPassword ? validatePasswordStrength(newPassword, email) : null;
 
   useEffect(() => {
     if (!enforceVerificationUser) {
@@ -205,15 +250,81 @@ export default function AuthScreen({
     }
   };
 
-  const handleAdminAuth = (e: React.FormEvent) => {
+  const verifyAdminCredentials = async (
+    candidateEmail: string,
+    candidatePassword: string
+  ): Promise<{ authorized: boolean; error?: string }> => {
+    const cleanTarget = (candidateEmail || '').trim().toLowerCase();
+    if (cleanTarget !== 'oportunizahw@gmail.com' || !candidatePassword) {
+      return { authorized: false, error: 'Credenciais administrativas inválidas.' };
+    }
+
+    if (!shouldSkipApiEmailProbe()) {
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 2500);
+      try {
+        const res = await fetch(buildApiEndpoint('/api/admin-verify'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: ctrl.signal,
+          body: JSON.stringify({ email: cleanTarget, password: candidatePassword })
+        });
+        const isJson = (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
+        const data: any = isJson ? await res.json().catch(() => ({})) : {};
+        if (!isJson || res.status === 404 || res.status === 405) {
+          markApiEmailProbeUnavailable();
+        } else if (res.ok && data?.ok) {
+          return { authorized: true };
+        } else {
+          return {
+            authorized: false,
+            error: data?.error || 'E-mail ou senha do administrador incorretos.'
+          };
+        }
+      } catch {
+        markApiEmailProbeUnavailable();
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    const clientValid = verifyAdminAccessCodeClient(candidatePassword);
+    return clientValid
+      ? { authorized: true }
+      : { authorized: false, error: 'E-mail ou senha do administrador incorretos.' };
+  };
+
+  const handleAdminAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    const now = Date.now();
+    if (adminLockoutUntil > now) {
+      const waitSec = Math.ceil((adminLockoutUntil - now) / 1000);
+      setError(`Acesso administrativo temporariamente bloqueado por excesso de erros. Aguarde ${waitSec}s.`);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
 
-    if (adminPassword === '06042025') {
+    const verification = await verifyAdminCredentials('oportunizahw@gmail.com', adminPassword);
+    if (verification.authorized) {
+      setAdminFailedAttempts(0);
+      setAdminLockoutUntil(0);
       clearSession2FAVerification();
       setSuccess('Credenciais validadas! Redirecionando para verificação 2FA...');
+      try {
+        await recordAuditLog({
+          actor_name: 'Administrador Orchent',
+          actor_email: 'oportunizahw@gmail.com',
+          actor_role: 'Administrador',
+          action: 'Autenticação Primária Admin Autorizada',
+          target_name: 'Painel Administrativo Oportuniza',
+          target_type: 'security',
+          details: 'Credenciais primárias validadas; aguardando código 2FA por e-mail.',
+          status: 'authorized'
+        });
+      } catch {}
       const adminUser = {
         id: '00000000-0000-4000-8000-000000000604',
         name: 'Administrador Orchent',
@@ -229,10 +340,31 @@ export default function AuthScreen({
         if (onAdminLoginSuccess) {
           onAdminLoginSuccess(adminUser);
         }
-      }, 650);
+      }, 150);
     } else {
+      const nextFails = adminFailedAttempts + 1;
+      setAdminFailedAttempts(nextFails);
+      setAdminPassword('');
       setLoading(false);
-      setError('E-mail ou senha do administrador incorretos.');
+      if (nextFails >= 5) {
+        setAdminLockoutUntil(Date.now() + 60 * 1000);
+        setAdminFailedAttempts(0);
+        setError('5 tentativas incorretas detectadas. Acesso administrativo bloqueado por 60 segundos.');
+        try {
+          await recordAuditLog({
+            actor_name: 'Sistema Anti-Fraude Oportuniza',
+            actor_email: 'oportunizahw@gmail.com',
+            actor_role: 'Firewall de Segurança',
+            action: 'Bloqueio Preventivo de Login Admin',
+            target_name: 'Painel Administrativo',
+            target_type: 'security',
+            details: '5 erros consecutivos no código administrativo acionaram pausa automática de 60 segundos.',
+            status: 'warning'
+          });
+        } catch {}
+      } else {
+        setError(verification.error || `E-mail ou senha do administrador incorretos (${5 - nextFails} tentativa(s) restante(s)).`);
+      }
     }
   };
 
@@ -306,53 +438,137 @@ export default function AuthScreen({
     };
 
     if (isRecover) {
+      const cleanRecEmail = email.trim().toLowerCase();
+
       if (recoveryStep === 'request') {
-        const cleanRecEmail = email.trim().toLowerCase();
         if (!cleanRecEmail || !cleanRecEmail.includes('@')) {
           setError('Por favor, digite seu e-mail completo.');
           setLoading(false);
           return;
         }
 
-        const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const generatedCode = generateSecureOtpCode();
         setSentRecoveryCode(generatedCode);
+        setRecoveryChallengeId(null);
+        setRecoveryServerVerified(false);
+        setRecoveryResetToken(null);
+        setRecoveryFailedAttempts(0);
+        setRecoveryHasSupabaseSession(false);
 
-        try {
-          await fetch(buildApiEndpoint('/api/send-password-recovery-email'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanRecEmail, code: generatedCode })
-          });
-        } catch (apiErr) {
-          console.warn("Server recovery mail API warning:", apiErr);
+        const mailRes = await sendVerificationCodeEmail({
+          email: cleanRecEmail,
+          code: generatedCode,
+          userName: cleanRecEmail.split('@')[0],
+          kind: 'recovery'
+        });
+
+        setRecoveryDeliveryMethod(mailRes.deliveryMethod || 'smtp');
+
+        if (mailRes.delivered) {
+          setRecoveryChallengeId(mailRes.challengeId || null);
+          setRecoveryServerVerified(Boolean(mailRes.serverVerified && mailRes.challengeId));
+          setRecoveryExpiresAt(Date.now() + (mailRes.expiresInSeconds || 600) * 1000);
+          setSuccess(mailRes.message || `Código de 8 dígitos enviado com sucesso para ${cleanRecEmail}! Digite o código abaixo.`);
+          setRecoveryStep('verify-code');
+        } else if (mailRes.timedOut) {
+          setRecoveryExpiresAt(Date.now() + 10 * 60 * 1000);
+          setSuccess(`Verifique sua caixa de entrada ou Spam de ${cleanRecEmail} — digite o código de 8 dígitos abaixo.`);
+          setRecoveryStep('verify-code');
+        } else {
+          setError(mailRes.error || 'Não foi possível enviar o código de recuperação. Tente novamente em instantes.');
         }
 
-        try {
-          await supabase.auth.resetPasswordForEmail(cleanRecEmail);
-        } catch (spErr) {
-          console.warn("Supabase auth reset warning:", spErr);
-        }
-
-        setSuccess(`Código de 6 dígitos enviado com sucesso para ${cleanRecEmail}! Digite o código abaixo.`);
-        setRecoveryStep('verify-code');
         setLoading(false);
         return;
       }
 
       if (recoveryStep === 'verify-code') {
+        if (recoveryFailedAttempts >= 5) {
+          setError('Código bloqueado após 5 tentativas incorretas. Volte e solicite um novo código.');
+          setLoading(false);
+          return;
+        }
+        if (Date.now() > recoveryExpiresAt) {
+          setError('Este código expirou após 10 minutos. Volte e solicite um novo código.');
+          setLoading(false);
+          return;
+        }
+
         const cleanCode = recoveryCodeInput.trim();
-        if (cleanCode.length < 6) {
-          setError('Por favor, informe o código de 6 dígitos enviado para seu e-mail.');
+        if (cleanCode.length !== 8) {
+          setError('Por favor, informe os 8 dígitos enviados para seu e-mail.');
           setLoading(false);
           return;
         }
 
-        if (cleanCode !== sentRecoveryCode && cleanCode !== '123456' && cleanCode !== '000000') {
-          setError('Código de verificação incorreto. Verifique no e-mail recebido e tente novamente.');
+        if (recoveryDeliveryMethod === 'supabase-otp') {
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('oportuniza-recovery-in-progress', cleanRecEmail);
+          }
+          const otpCheck = await verifySupabaseOtpCode(cleanRecEmail, cleanCode, ['email', 'magiclink', 'recovery']);
+          if (!otpCheck.verified) {
+            if (typeof window !== 'undefined') {
+              sessionStorage.removeItem('oportuniza-recovery-in-progress');
+            }
+            const nextFails = recoveryFailedAttempts + 1;
+            setRecoveryFailedAttempts(nextFails);
+            setRecoveryCodeInput('');
+            setError(
+              nextFails >= 5
+                ? 'Código bloqueado após 5 tentativas incorretas. Volte e solicite um novo código.'
+                : `Código de recuperação incorreto ou expirado. Restam ${5 - nextFails} tentativa(s).`
+            );
+            setLoading(false);
+            return;
+          }
+          setRecoveryHasSupabaseSession(true);
+          setRecoveryFailedAttempts(0);
+          setSuccess('Código verificado com sucesso! Agora defina sua nova senha.');
+          setRecoveryStep('new-password');
           setLoading(false);
           return;
         }
 
+        if (recoveryServerVerified && recoveryChallengeId) {
+          const serverCheck = await verifyServerSecurityCode({
+            challengeId: recoveryChallengeId,
+            email: cleanRecEmail,
+            code: cleanCode,
+            kind: 'recovery'
+          });
+          if (!serverCheck.verified) {
+            if (serverCheck.locked) {
+              setRecoveryFailedAttempts(5);
+            } else {
+              setRecoveryFailedAttempts((prev) => prev + 1);
+            }
+            setRecoveryCodeInput('');
+            setError(serverCheck.error || 'Código incorreto. Verifique no e-mail recebido e tente novamente.');
+            setLoading(false);
+            return;
+          }
+          setRecoveryResetToken(serverCheck.resetToken || null);
+          setRecoveryFailedAttempts(0);
+          setSuccess('Código verificado com sucesso! Agora defina sua nova senha.');
+          setRecoveryStep('new-password');
+          setLoading(false);
+          return;
+        }
+
+        if (!sentRecoveryCode || cleanCode !== sentRecoveryCode) {
+          const nextFails = recoveryFailedAttempts + 1;
+          setRecoveryFailedAttempts(nextFails);
+          setRecoveryCodeInput('');
+          setError(
+            nextFails >= 5
+              ? 'Código bloqueado após 5 tentativas incorretas. Volte e solicite um novo código.'
+              : `Código de verificação incorreto. Restam ${5 - nextFails} tentativa(s).`
+          );
+          setLoading(false);
+          return;
+        }
+
+        setRecoveryFailedAttempts(0);
         setSuccess('Código verificado com sucesso! Agora defina sua nova senha.');
         setRecoveryStep('new-password');
         setLoading(false);
@@ -360,8 +576,9 @@ export default function AuthScreen({
       }
 
       if (recoveryStep === 'new-password') {
-        if (newPassword.length < 6) {
-          setError('A nova senha deve conter pelo menos 6 caracteres.');
+        const pwdCheck = validatePasswordStrength(newPassword, cleanRecEmail);
+        if (!pwdCheck.isValid) {
+          setError(pwdCheck.error || 'A nova senha deve conter pelo menos 8 caracteres combinando letras e números.');
           setLoading(false);
           return;
         }
@@ -373,8 +590,6 @@ export default function AuthScreen({
         }
 
         try {
-          const cleanRecEmail = email.trim().toLowerCase();
-          
           if (!cleanRecEmail) {
             setError('Sessão expirada. Por favor, reinicie o processo de recuperação.');
             setRecoveryStep('request');
@@ -382,29 +597,81 @@ export default function AuthScreen({
             return;
           }
 
-          // 1. Chamar o endpoint dedicado no backend que atualiza o banco de dados
-          const response = await fetch(buildApiEndpoint('/api/update-password'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanRecEmail, newPassword: newPassword })
-          });
+          const { data: sessionData } = await supabase.auth.getSession();
+          const accessToken = sessionData?.session?.access_token || '';
 
-          const result = await response.json().catch(() => ({}));
-
-          if (!response.ok) {
-            const errorMsg = result.hint ? `${result.error}. ${result.hint}` : (result.error || 'Este recurso requer servidor ativo. Use o link de redefinição enviado por e-mail.');
-            throw new Error(errorMsg);
+          let updatedSupabaseAuth = false;
+          if (recoveryHasSupabaseSession || accessToken) {
+            const { error: supaErr } = await supabase.auth.updateUser({ password: newPassword });
+            if (!supaErr) {
+              updatedSupabaseAuth = true;
+            }
+            try {
+              const hashedPwd = await hashPasswordForStorageClient(newPassword);
+              await supabase
+                .from('users')
+                .update({ password: hashedPwd, updated_at: new Date().toISOString() })
+                .ilike('email', cleanRecEmail);
+            } catch {
+              // Optional profile password hash sync
+            }
           }
 
-          // 2. Tentar atualizar também via Supabase Auth (apenas se houver sessão, caso contrário falha silenciosamente)
+          let updatedBackend = false;
+          if (!shouldSkipApiEmailProbe() && (recoveryResetToken || accessToken)) {
+            const response = await fetch(buildApiEndpoint('/api/update-password'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+              },
+              body: JSON.stringify({
+                email: cleanRecEmail,
+                newPassword,
+                ...(recoveryResetToken ? { resetToken: recoveryResetToken } : {})
+              })
+            });
+
+            const isJson = (response.headers.get('content-type') || '').toLowerCase().includes('application/json');
+            const result = isJson ? await response.json().catch(() => ({})) : {};
+
+            if (!isJson || response.status === 404 || response.status === 405) {
+              markApiEmailProbeUnavailable();
+            } else if (response.ok) {
+              updatedBackend = true;
+            } else if (!updatedSupabaseAuth) {
+              const errorMsg = result.hint ? `${result.error}. ${result.hint}` : (result.error || 'Não foi possível redefinir a senha.');
+              throw new Error(errorMsg);
+            }
+          }
+
+          if (!updatedSupabaseAuth && !updatedBackend) {
+            throw new Error('Não foi possível validar a sessão de recuperação para alterar a senha. Recomece o processo.');
+          }
+
           try {
-            await supabase.auth.updateUser({ password: newPassword });
-          } catch (authErr) {
-            // Ignoramos erro de auth aqui pois o banco já foi atualizado pelo backend
-          }
+            await recordAuditLog({
+              actor_name: cleanRecEmail.split('@')[0],
+              actor_email: cleanRecEmail,
+              actor_role: 'Recuperação de Conta',
+              action: 'Redefinição de Senha Concluída',
+              target_name: cleanRecEmail,
+              target_type: 'security',
+              details: 'Senha atualizada após validação de código de segurança de 8 dígitos.',
+              status: 'authorized'
+            });
+          } catch {}
 
-          setSuccess('Excelente! Sua senha foi redefinida e sincronizada com sucesso. Redirecionando...');
-          
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('oportuniza-recovery-in-progress');
+          }
+          clearSession2FAVerification();
+          try {
+            await supabase.auth.signOut({ scope: 'local' });
+          } catch {}
+
+          setSuccess('Excelente! Sua senha foi redefinida com segurança. Faça login com sua nova senha...');
+
           setTimeout(() => {
             setRecoveryStep('request');
             setIsRecover(false);
@@ -413,11 +680,18 @@ export default function AuthScreen({
             setNewPassword('');
             setConfirmNewPassword('');
             setRecoveryCodeInput('');
+            setRecoveryResetToken(null);
+            setRecoveryChallengeId(null);
+            setRecoveryServerVerified(false);
+            setRecoveryHasSupabaseSession(false);
             setError(null);
             setSuccess(null);
             setLoading(false);
-          }, 2000);
+          }, 1800);
         } catch (err: any) {
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('oportuniza-recovery-in-progress');
+          }
           console.error('Password reset flow error:', err);
           setError(err.message || 'Erro ao redefinir a senha. Tente novamente.');
           setLoading(false);
@@ -525,8 +799,9 @@ export default function AuthScreen({
         return;
       }
 
-      if (password.length < 4) {
-        setError('A senha deve conter pelo menos 4 caracteres.');
+      const pwdStrengthCheck = validatePasswordStrength(password, cleanEmail);
+      if (!pwdStrengthCheck.isValid) {
+        setError(pwdStrengthCheck.error || 'A senha deve conter pelo menos 8 caracteres combinando letras e números.');
         setLoading(false);
         return;
       }
@@ -534,6 +809,14 @@ export default function AuthScreen({
 
     try {
       if (isLogin) {
+        const nowTs = Date.now();
+        if (loginLockoutUntil > nowTs) {
+          const waitSec = Math.ceil((loginLockoutUntil - nowTs) / 1000);
+          setError(`Muitas tentativas de login incorretas. Por segurança, aguarde ${waitSec}s.`);
+          setLoading(false);
+          return;
+        }
+
         // Sempre limpar a verificação 2FA da sessão anterior em qualquer nova tentativa de login
         clearSession2FAVerification();
 
@@ -565,12 +848,25 @@ export default function AuthScreen({
               return;
             }
 
-            // Só permite fallback se a senha cadastrada na tabela public.users conferir exatamente
-            if (!dbUserMatch.password || dbUserMatch.password !== password) {
-              setError('E-mail ou senha incorretos.');
+            const passwordMatched = dbUserMatch.password
+              ? await verifyStoredPasswordClient(password, dbUserMatch.password)
+              : false;
+            if (!passwordMatched) {
+              const nextFails = loginFailedAttempts + 1;
+              setLoginFailedAttempts(nextFails);
+              if (nextFails >= 5) {
+                setLoginLockoutUntil(Date.now() + 45 * 1000);
+                setLoginFailedAttempts(0);
+                setError('5 tentativas incorretas detectadas. Login pausado por 45 segundos para proteger sua conta.');
+              } else {
+                setError(`E-mail ou senha incorretos (${5 - nextFails} tentativa(s) restante(s)).`);
+              }
               setLoading(false);
               return;
             }
+
+            setLoginFailedAttempts(0);
+            setLoginLockoutUntil(0);
 
             const isDbAdmin = Boolean(
               dbUserMatch.is_admin ||
@@ -612,27 +908,45 @@ export default function AuthScreen({
             }
             return;
           } else {
-            // Admin fallback (exige senha administrativa válida e obriga 2FA na próxima tela)
-            if (cleanEmail === 'oportunizahw@gmail.com' && password === '06042025') {
-              const adminFallback: AppUser = {
-                id: '00000000-0000-4000-8000-000000000604',
-                name: 'Administrador Orchent',
-                email: cleanEmail,
-                isAdmin: true,
-                role: 'Administrador',
-                cargo: 'Administrador',
-                is2FAEnabled: true
-              };
-              setLoading(false);
-              if (onLoginSuccess) {
-                onLoginSuccess(adminFallback);
+            // Admin fallback (exige validação administrativa server/hash e obriga 2FA na próxima tela)
+            if (cleanEmail === 'oportunizahw@gmail.com') {
+              const adminCheck = await verifyAdminCredentials(cleanEmail, password);
+              if (adminCheck.authorized) {
+                setLoginFailedAttempts(0);
+                setLoginLockoutUntil(0);
+                const adminFallback: AppUser = {
+                  id: '00000000-0000-4000-8000-000000000604',
+                  name: 'Administrador Orchent',
+                  email: cleanEmail,
+                  isAdmin: true,
+                  role: 'Administrador',
+                  cargo: 'Administrador',
+                  is2FAEnabled: true
+                };
+                setLoading(false);
+                if (onLoginSuccess) {
+                  onLoginSuccess(adminFallback);
+                }
+                return;
               }
-              return;
             }
+          }
+
+          const nextFails = loginFailedAttempts + 1;
+          setLoginFailedAttempts(nextFails);
+          if (nextFails >= 5) {
+            setLoginLockoutUntil(Date.now() + 45 * 1000);
+            setLoginFailedAttempts(0);
+            setLoading(false);
+            setError('5 tentativas incorretas detectadas. Login pausado por 45 segundos para proteger sua conta.');
+            return;
           }
 
           throw authResult.error;
         }
+
+        setLoginFailedAttempts(0);
+        setLoginLockoutUntil(0);
 
         const data = authResult.data;
         
@@ -718,38 +1032,22 @@ export default function AuthScreen({
           }
         }
       } else {
-        // 1. Verificação prévia de cadastro: se o email já existe ou está bloqueado no banco
-        const isBlockedPreReg = await isAccountBlocked({ email: cleanEmail });
-        if (isBlockedPreReg) {
-          const reason = await fetchAccountBlockReason({ email: cleanEmail });
+        // 1. Verificação prévia de cadastro via RPC seguro (sem expor perfis de outros usuários)
+        const preCheck = await checkEmailRegisteredOrBlocked(cleanEmail);
+        if (preCheck.isBlocked) {
+          const reason = preCheck.blockReason || await fetchAccountBlockReason({ email: cleanEmail });
           setError(`Esta conta/e-mail foi bloqueada pelo administrador. Motivo: "${reason}". Novos cadastros estão impedidos.`);
           setLoading(false);
           return;
         }
 
-        try {
-          const { data: existingUser } = await supabase
-            .from('users')
-            .select('*')
-            .ilike('email', cleanEmail)
-            .maybeSingle();
-
-          if (existingUser) {
-            if (isUserRecordBlocked(existingUser)) {
-              const reason = extractBlockReasonFromRecord(existingUser) || await fetchAccountBlockReason({ email: cleanEmail });
-              setError(`Esta conta/e-mail foi bloqueada pelo administrador. Motivo: "${reason}". Novos cadastros estão impedidos.`);
-            } else {
-              setError('Este e-mail já está sendo utilizado ou encontra-se cadastrado.');
-            }
-            setLoading(false);
-            return;
-          }
-        } catch (e) {
-          console.warn('Aviso na verificação pré-cadastro:', e);
+        if (preCheck.exists) {
+          setError('Este e-mail já está sendo utilizado ou encontra-se cadastrado.');
+          setLoading(false);
+          return;
         }
 
         const displayName = accountType === 'company' ? companyName.trim() : fullName.trim();
-        const isSupportRegistration = cleanEmail.includes('atendimento') || cleanEmail.includes('suporte') || cleanEmail.includes('atendente');
 
         const userMetadata: Record<string, any> = {
           full_name: displayName,
@@ -758,8 +1056,8 @@ export default function AuthScreen({
           requires_activation: true,
           account_activated: false,
           profile_completed: true,
-          role: isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Candidato'),
-          cargo: isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Estudante')
+          role: accountType === 'company' ? 'Empresa' : 'Candidato',
+          cargo: accountType === 'company' ? 'Empresa' : 'Estudante'
         };
 
         if (accountType === 'company') {
@@ -796,9 +1094,13 @@ export default function AuthScreen({
           throw signUpError;
         }
         
-        // --- Verificação por Código de 6 Dígitos ---
-        const registrationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        // --- Verificação por Código de 8 Dígitos (CSPRNG) ---
+        const registrationCode = generateSecureOtpCode();
         setSentRegCode(registrationCode);
+        setRegChallengeId(null);
+        setRegServerVerified(false);
+        setRegExpiresAt(Date.now() + 10 * 60 * 1000);
+        setRegFailedAttempts(0);
         setRegVerifyCodeInput('');
         setRegTimer(60);
         
@@ -823,8 +1125,8 @@ export default function AuthScreen({
           responsibleName: accountType === 'company' ? responsibleName.trim() : undefined,
           companySegment: accountType === 'company' ? companySegment : undefined,
           companyNeighborhood: accountType === 'company' ? companyNeighborhood : neighborhood,
-          role: isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Candidato'),
-          cargo: isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Estudante')
+          role: accountType === 'company' ? 'Empresa' : 'Candidato',
+          cargo: accountType === 'company' ? 'Empresa' : 'Estudante'
         };
         
         setTempLoggedUser(newUser);
@@ -841,17 +1143,24 @@ export default function AuthScreen({
           setRegDeliveryMethod('smtp');
           setRegEmailStatus({ sending: true });
           const mailResult = await sendActivationCodeEmail(cleanEmail, registrationCode, newUser.name);
+          if (mailResult.deliveryMethod) {
+            setRegDeliveryMethod(mailResult.deliveryMethod);
+          }
           if (mailResult.delivered) {
             setRegDeliveryMethod(mailResult.deliveryMethod || 'smtp');
+            setRegChallengeId(mailResult.challengeId || null);
+            setRegServerVerified(Boolean(mailResult.serverVerified && mailResult.challengeId));
+            setRegExpiresAt(Date.now() + (mailResult.expiresInSeconds || 600) * 1000);
             setRegEmailStatus({
               sending: false,
               delivered: true,
               message:
                 mailResult.message ||
-                `Código de 6 dígitos enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${cleanEmail}.`
+                `Código de 8 dígitos enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${cleanEmail}.`
             });
-            setSuccess(`Um código de 6 dígitos foi enviado para ${cleanEmail}. Digite-o abaixo para ativar sua conta.`);
+            setSuccess(`Um código de 8 dígitos foi enviado para ${cleanEmail}. Digite-o abaixo para ativar sua conta.`);
           } else {
+            setRegTimer(0);
             setRegEmailStatus({
               sending: false,
               delivered: false,
@@ -920,8 +1229,12 @@ export default function AuthScreen({
     const cleanTargetEmail = (targetUser.email || '').trim().toLowerCase();
     if (!cleanTargetEmail) return;
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = generateSecureOtpCode();
     setOauthSentCode(code);
+    setOauthChallengeId(null);
+    setOauthServerVerified(false);
+    setOauthExpiresAt(Date.now() + 10 * 60 * 1000);
+    setOauthFailedAttempts(0);
     setOauthCodeInput('');
     setOauthTimer(60);
     setOauthDeliveryMethod('smtp');
@@ -929,29 +1242,46 @@ export default function AuthScreen({
     setSuccess(null);
     setOauthEmailStatus({ sending: true });
 
-    const res = await sendVerificationCodeEmail({
-      email: cleanTargetEmail,
-      code,
-      userName: targetUser.name || cleanTargetEmail.split('@')[0],
-      kind: 'login-2fa',
-      isAdmin: Boolean(targetUser.isAdmin),
-      accountType: targetUser.accountType
-    });
-
-    if (res.delivered) {
-      setOauthDeliveryMethod(res.deliveryMethod || 'smtp');
-      setOauthEmailStatus({
-        sending: false,
-        delivered: true,
-        message:
-          res.message ||
-          `Código enviado via ${res.providerLabel || 'oportunizahw@gmail.com'} para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
+    try {
+      const res = await sendVerificationCodeEmail({
+        email: cleanTargetEmail,
+        code,
+        userName: targetUser.name || cleanTargetEmail.split('@')[0],
+        kind: 'login-2fa',
+        isAdmin: Boolean(targetUser.isAdmin),
+        accountType: targetUser.accountType
       });
-    } else {
+
+      if (res.deliveryMethod) {
+        setOauthDeliveryMethod(res.deliveryMethod);
+      }
+
+      if (res.delivered) {
+        setOauthDeliveryMethod(res.deliveryMethod || 'smtp');
+        setOauthChallengeId(res.challengeId || null);
+        setOauthServerVerified(Boolean(res.serverVerified && res.challengeId));
+        setOauthExpiresAt(Date.now() + (res.expiresInSeconds || 600) * 1000);
+        setOauthEmailStatus({
+          sending: false,
+          delivered: true,
+          message:
+            res.message ||
+            `Código enviado via ${res.providerLabel || 'oportunizahw@gmail.com'} para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
+        });
+      } else {
+        setOauthTimer(0);
+        setOauthEmailStatus({
+          sending: false,
+          delivered: false,
+          message: res.error || `Não foi possível enviar o código para ${cleanTargetEmail}. Clique em "Reenviar código".`
+        });
+      }
+    } catch (err: any) {
+      setOauthTimer(0);
       setOauthEmailStatus({
         sending: false,
         delivered: false,
-        message: res.error || `Não foi possível enviar o código para ${cleanTargetEmail}. Clique em "Reenviar código".`
+        message: err?.message || `Erro inesperado ao enviar código para ${cleanTargetEmail}. Clique em "Reenviar código".`
       });
     }
   };
@@ -1020,8 +1350,12 @@ export default function AuthScreen({
     const targetEmail = (tempLoggedUser?.email || email).trim().toLowerCase();
     if (!targetEmail) return;
 
-    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const newCode = generateSecureOtpCode();
     setSentRegCode(newCode);
+    setRegChallengeId(null);
+    setRegServerVerified(false);
+    setRegExpiresAt(Date.now() + 10 * 60 * 1000);
+    setRegFailedAttempts(0);
     setRegTimer(60);
     setRegDeliveryMethod('smtp');
     setError(null);
@@ -1029,8 +1363,14 @@ export default function AuthScreen({
     setRegEmailStatus({ sending: true });
 
     const mailResult = await sendActivationCodeEmail(targetEmail, newCode, tempLoggedUser?.name || fullName || companyName || targetEmail.split('@')[0]);
+    if (mailResult.deliveryMethod) {
+      setRegDeliveryMethod(mailResult.deliveryMethod);
+    }
     if (mailResult.delivered) {
       setRegDeliveryMethod(mailResult.deliveryMethod || 'smtp');
+      setRegChallengeId(mailResult.challengeId || null);
+      setRegServerVerified(Boolean(mailResult.serverVerified && mailResult.challengeId));
+      setRegExpiresAt(Date.now() + (mailResult.expiresInSeconds || 600) * 1000);
       setRegEmailStatus({
         sending: false,
         delivered: true,
@@ -1038,8 +1378,9 @@ export default function AuthScreen({
           mailResult.message ||
           `Novo código enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${targetEmail}.`
       });
-      setSuccess(`Reenviamos um novo código de 6 dígitos para ${targetEmail}.`);
+      setSuccess(`Reenviamos um novo código de 8 dígitos para ${targetEmail}.`);
     } else {
+      setRegTimer(0);
       setRegEmailStatus({
         sending: false,
         delivered: false,
@@ -1053,26 +1394,72 @@ export default function AuthScreen({
     setError(null);
     setSuccess(null);
 
-    const entered = oauthCodeInput.trim();
-    if (entered.length !== 6) {
-      setError('Digite os 6 dígitos do código de ativação enviado para o seu e-mail.');
+    if (oauthFailedAttempts >= 5) {
+      setError('Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".');
+      return;
+    }
+    if (Date.now() > oauthExpiresAt) {
+      setOauthTimer(0);
+      setError('Este código expirou após 10 minutos. Clique em "Reenviar código".');
       return;
     }
 
+    const entered = oauthCodeInput.trim();
+    if (entered.length !== 8) {
+      setError('Digite os 8 dígitos do código de ativação enviado para o seu e-mail.');
+      return;
+    }
+
+    const targetEmail = (enforceVerificationUser?.email || email).trim().toLowerCase();
+
     if (oauthDeliveryMethod === 'supabase-otp') {
-      const targetEmail = (enforceVerificationUser?.email || email).trim().toLowerCase();
       setLoading(true);
-      const otpCheck = await verifySupabaseOtpCode(targetEmail, entered);
+      const otpCheck = await verifySupabaseOtpCode(targetEmail, entered, ['email', 'magiclink', 'signup']);
       setLoading(false);
       if (!otpCheck.verified) {
-        setError('Código de ativação incorreto ou expirado. Confira o código recebido no seu e-mail.');
+        const nextFails = oauthFailedAttempts + 1;
+        setOauthFailedAttempts(nextFails);
+        setOauthCodeInput('');
+        setError(
+          nextFails >= 5
+            ? 'Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".'
+            : `Código de ativação incorreto ou expirado. Restam ${5 - nextFails} tentativa(s).`
+        );
+        return;
+      }
+    } else if (oauthServerVerified && oauthChallengeId) {
+      setLoading(true);
+      const serverCheck = await verifyServerSecurityCode({
+        challengeId: oauthChallengeId,
+        email: targetEmail,
+        code: entered,
+        kind: 'login-2fa'
+      });
+      setLoading(false);
+      if (!serverCheck.verified) {
+        if (serverCheck.locked) {
+          setOauthFailedAttempts(5);
+          setOauthTimer(0);
+        } else {
+          setOauthFailedAttempts((prev) => prev + 1);
+        }
+        setOauthCodeInput('');
+        setError(serverCheck.error || 'Código de ativação incorreto. Confira o e-mail e tente novamente.');
         return;
       }
     } else if (!oauthSentCode || entered !== oauthSentCode) {
-      setError('Código de ativação incorreto. Confira o código recebido no seu e-mail e tente novamente.');
+      const nextFails = oauthFailedAttempts + 1;
+      setOauthFailedAttempts(nextFails);
+      setOauthCodeInput('');
+      setError(
+        nextFails >= 5
+          ? 'Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".'
+          : `Código de ativação incorreto. Restam ${5 - nextFails} tentativa(s).`
+      );
       return;
     }
 
+    setOauthFailedAttempts(0);
     setSuccess('Código 2FA verificado! Agora preencha suas informações para liberar sua conta.');
     setOauthStep('complete-info');
   };
@@ -1086,10 +1473,6 @@ export default function AuthScreen({
     setSuccess(null);
 
     const cleanTargetEmail = (enforceVerificationUser.email || email).trim().toLowerCase();
-    const isSupportRegistration =
-      cleanTargetEmail.includes('atendimento') ||
-      cleanTargetEmail.includes('suporte') ||
-      cleanTargetEmail.includes('atendente');
 
     if (accountType === 'candidate') {
       const nameVal = validatePersonOrCompanyName(fullName, false);
@@ -1173,8 +1556,8 @@ export default function AuthScreen({
       const { data: { user: sessionUser } } = await supabase.auth.getUser();
       const userId = sessionUser?.id || enforceVerificationUser.id || 'usr-' + Date.now();
       const displayName = accountType === 'company' ? companyName.trim() : fullName.trim();
-      const resolvedRole = isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Candidato');
-      const resolvedCargo = isSupportRegistration ? 'Atendimento Oportuniza' : (accountType === 'company' ? 'Empresa' : 'Estudante');
+      const resolvedRole = accountType === 'company' ? 'Empresa' : 'Candidato';
+      const resolvedCargo = accountType === 'company' ? 'Empresa' : 'Estudante';
       const resolvedBio =
         accountType === 'company'
           ? `Empresa atuante no setor ${companySegment} em Araucária (${companyNeighborhood})`
@@ -1261,8 +1644,12 @@ export default function AuthScreen({
         sessionStorage.removeItem('oportuniza-reg-in-progress');
       }
 
-      // Usuário acabou de verificar 2FA nesta ativação; marca sessão atual para não pedir 2x seguidas
-      markSession2FAVerified(userId, cleanTargetEmail);
+      // Usuário acabou de verificar 2FA nesta ativação; marca sessão atual com assinatura de cargo
+      markSession2FAVerified(
+        userId,
+        cleanTargetEmail,
+        buildSessionRoleSignature(resolvedRole, Boolean(activatedUser.isAdmin))
+      );
 
       try {
         await supabase.auth.updateUser({
@@ -1318,32 +1705,76 @@ export default function AuthScreen({
 
   const handleVerifyRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (regFailedAttempts >= 5) {
+      setError('Código invalidado após 5 tentativas incorretas. Clique em "Reenviar código".');
+      return;
+    }
+    if (Date.now() > regExpiresAt) {
+      setRegTimer(0);
+      setError('Este código expirou após 10 minutos. Clique em "Reenviar código".');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
 
     const targetEmailCheck = (tempLoggedUser?.email || email).trim().toLowerCase();
     const enteredCode = regVerifyCodeInput.trim();
-    if (enteredCode.length !== 6) {
-      setError('Digite todos os 6 dígitos do código enviado para seu e-mail.');
+    if (enteredCode.length !== 8) {
+      setError('Digite todos os 8 dígitos do código enviado para seu e-mail.');
       setLoading(false);
       return;
     }
 
     let verifiedSessionUserId: string | undefined;
     if (regDeliveryMethod === 'supabase-otp') {
-      const otpCheck = await verifySupabaseOtpCode(targetEmailCheck, enteredCode);
+      const otpCheck = await verifySupabaseOtpCode(targetEmailCheck, enteredCode, ['signup', 'email', 'magiclink']);
       if (!otpCheck.verified) {
-        setError('Código de ativação incorreto ou expirado. Verifique o código enviado no seu e-mail.');
+        const nextFails = regFailedAttempts + 1;
+        setRegFailedAttempts(nextFails);
+        setRegVerifyCodeInput('');
+        setError(
+          nextFails >= 5
+            ? 'Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".'
+            : `Código de ativação incorreto ou expirado. Restam ${5 - nextFails} tentativa(s).`
+        );
         setLoading(false);
         return;
       }
       verifiedSessionUserId = otpCheck.userId;
+    } else if (regServerVerified && regChallengeId) {
+      const serverCheck = await verifyServerSecurityCode({
+        challengeId: regChallengeId,
+        email: targetEmailCheck,
+        code: enteredCode,
+        kind: 'registration'
+      });
+      if (!serverCheck.verified) {
+        if (serverCheck.locked) {
+          setRegFailedAttempts(5);
+          setRegTimer(0);
+        } else {
+          setRegFailedAttempts((prev) => prev + 1);
+        }
+        setRegVerifyCodeInput('');
+        setError(serverCheck.error || 'Código de ativação incorreto. Verifique o código enviado no seu e-mail.');
+        setLoading(false);
+        return;
+      }
     } else if (!sentRegCode || enteredCode !== sentRegCode) {
-      setError('Código de ativação incorreto. Verifique o código enviado no seu e-mail.');
+      const nextFails = regFailedAttempts + 1;
+      setRegFailedAttempts(nextFails);
+      setRegVerifyCodeInput('');
+      setError(
+        nextFails >= 5
+          ? 'Código bloqueado após 5 tentativas incorretas. Clique em "Reenviar código".'
+          : `Código de ativação incorreto. Restam ${5 - nextFails} tentativa(s).`
+      );
       setLoading(false);
       return;
     }
+    setRegFailedAttempts(0);
 
     const { data: { user: sessionUser } } = await supabase.auth.getUser();
 
@@ -1448,13 +1879,17 @@ export default function AuthScreen({
           action: 'Ativação de Conta por E-mail',
           target_name: cleanFinalEmail,
           target_type: 'security',
-          details: `Cadastro ativado por código de 6 dígitos (${baseUser.accountType || 'candidate'}).`,
+          details: `Cadastro ativado por código de 8 dígitos (${baseUser.accountType || 'candidate'}).`,
           status: 'authorized'
         });
       } catch {}
 
-      // Cadastro acabou de validar e-mail em 2 etapas; libera entrada direta na sessão atual
-      markSession2FAVerified(userId, cleanFinalEmail);
+      // Cadastro acabou de validar e-mail em 2 etapas; libera entrada direta com assinatura de cargo
+      markSession2FAVerified(
+        userId,
+        cleanFinalEmail,
+        buildSessionRoleSignature(baseUser.role || 'Candidato', Boolean(baseUser.isAdmin))
+      );
       setSuccess('Conta ativada com sucesso! Bem-vindo ao Oportuniza.');
       
       setTimeout(() => {
@@ -1521,7 +1956,7 @@ export default function AuthScreen({
                   Confirme seu Código 2FA
                 </h2>
                 <p className="text-gray-500 dark:text-slate-400 text-xs sm:text-sm mb-4 leading-relaxed">
-                  Para criar e ativar sua conta via Google/Social, digite o código de 6 dígitos enviado para:
+                  Para criar e ativar sua conta via Google/Social, digite o código de 8 dígitos enviado para:
                 </p>
 
                 <div className="mb-4 px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl inline-flex items-center gap-2 max-w-full">
@@ -1558,7 +1993,7 @@ export default function AuthScreen({
 
                   <div className="space-y-1.5 text-left">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
-                      Código de Ativação (6 dígitos)
+                      Código de Ativação (8 dígitos)
                     </label>
                     <div className="relative group">
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -1567,14 +2002,14 @@ export default function AuthScreen({
                       <input
                         type="text"
                         inputMode="numeric"
-                        maxLength={6}
-                        placeholder="000000"
+                        maxLength={8}
+                        placeholder="00000000"
                         value={oauthCodeInput}
                         onChange={(e) => {
                           setOauthCodeInput(e.target.value.replace(/\D/g, ''));
                           setError(null);
                         }}
-                        className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/40 focus:border-[#52A8C7] transition-all text-base font-mono font-bold tracking-[0.25em] text-center text-slate-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/40 focus:border-[#52A8C7] transition-all text-base font-mono font-bold tracking-[0.2em] text-center text-slate-900 dark:text-white"
                         required
                       />
                     </div>
@@ -1582,7 +2017,7 @@ export default function AuthScreen({
 
                   <button
                     type="submit"
-                    disabled={loading || oauthCodeInput.length < 6}
+                    disabled={loading || oauthCodeInput.length < 8}
                     className="w-full bg-[#52A8C7] hover:bg-[#3d90ad] text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-[#52A8C7]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                   >
                     {loading ? (
@@ -2230,14 +2665,14 @@ export default function AuthScreen({
                         <input 
                           type="text"
                           inputMode="numeric"
-                          maxLength={6}
-                          placeholder="Digite os 6 dígitos"
+                          maxLength={8}
+                          placeholder="Digite os 8 dígitos"
                           value={regVerifyCodeInput}
                           onChange={(e) => {
                             setRegVerifyCodeInput(e.target.value.replace(/\D/g, ''));
                             setError(null);
                           }}
-                          className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/50 focus:border-[#52A8C7] transition-all text-sm font-bold tracking-[0.2em] text-center"
+                          className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-[#52A8C7]/50 focus:border-[#52A8C7] transition-all text-sm font-mono font-bold tracking-[0.18em] text-center"
                           required
                         />
                       </div>
@@ -2245,7 +2680,7 @@ export default function AuthScreen({
 
                     <button 
                       type="submit"
-                      disabled={loading || regVerifyCodeInput.length < 6}
+                      disabled={loading || regVerifyCodeInput.length < 8}
                       className="w-full bg-[#52A8C7] hover:bg-[#3d90ad] text-white font-bold py-4 rounded-2xl shadow-lg shadow-[#52A8C7]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed group"
                     >
                       {loading ? (
@@ -2543,24 +2978,24 @@ export default function AuthScreen({
                           <span>Código enviado para {email}</span>
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
-                          Abra sua caixa de entrada no Gmail (enviado via oportunizahw@gmail.com) e digite o código de 6 dígitos abaixo:
+                          Abra sua caixa de entrada no Gmail (enviado via oportunizahw@gmail.com) e digite o código de 8 dígitos abaixo:
                         </p>
                       </div>
 
                       <div className="space-y-1.5 text-left">
                         <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider ml-1">
-                          Código de Verificação (6 Dígitos)
+                          Código de Verificação (8 Dígitos)
                         </label>
                         <div className="relative group flex items-center">
                           <KeyRound className="absolute left-3.5 w-4 h-4 text-[#52A8C7] transition-colors" />
                           <input 
                             type="text"
                             inputMode="numeric"
-                            maxLength={6}
+                            maxLength={8}
                             value={recoveryCodeInput}
                             onChange={(e) => setRecoveryCodeInput(e.target.value.replace(/\D/g, ''))}
                             required
-                            placeholder="Digite os 6 dígitos"
+                            placeholder="Digite os 8 dígitos"
                             className="w-full pl-10 pr-4 py-3.5 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] focus:bg-white dark:focus:bg-slate-900 transition-all text-base font-mono font-black tracking-widest text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-xs text-center"
                           />
                         </div>
@@ -2569,6 +3004,9 @@ export default function AuthScreen({
                       <button
                         type="button"
                         onClick={() => {
+                          if (typeof window !== 'undefined') {
+                            sessionStorage.removeItem('oportuniza-recovery-in-progress');
+                          }
                           setRecoveryStep('request');
                           setError(null);
                           setSuccess(null);
@@ -2602,7 +3040,7 @@ export default function AuthScreen({
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                             required
-                            placeholder="Mínimo 6 caracteres"
+                            placeholder="Mín. 8 dígitos (letras e números)"
                             className="w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] focus:bg-white dark:focus:bg-slate-900 transition-all text-xs sm:text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-xs"
                           />
                           <button
@@ -2613,6 +3051,31 @@ export default function AuthScreen({
                             {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
+                        {recoveryPasswordStrength && (
+                          <div className="pt-1 space-y-1">
+                            <div className="grid grid-cols-4 gap-1">
+                              {[1, 2, 3, 4].map((step) => (
+                                <div
+                                  key={step}
+                                  className={`h-1.5 rounded-full transition-colors ${
+                                    recoveryPasswordStrength.score >= step
+                                      ? recoveryPasswordStrength.score >= 4
+                                        ? 'bg-emerald-500'
+                                        : recoveryPasswordStrength.score === 3
+                                        ? 'bg-cyan-500'
+                                        : recoveryPasswordStrength.score === 2
+                                        ? 'bg-amber-500'
+                                        : 'bg-rose-500'
+                                      : 'bg-slate-200 dark:bg-slate-700'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                              Força da senha: <strong className="text-slate-700 dark:text-slate-200">{recoveryPasswordStrength.label}</strong>
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-1.5 text-left">
@@ -2656,7 +3119,7 @@ export default function AuthScreen({
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           required
-                          placeholder="••••••••"
+                          placeholder={isLogin ? "••••••••" : "Mín. 8 dígitos (letras e números)"}
                           className="w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#52A8C7]/20 focus:border-[#52A8C7] focus:bg-white dark:focus:bg-slate-900 transition-all text-xs sm:text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-xs"
                         />
                         <button
@@ -2668,6 +3131,31 @@ export default function AuthScreen({
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                      {signupPasswordStrength && (
+                        <div className="pt-1 space-y-1 text-left">
+                          <div className="grid grid-cols-4 gap-1">
+                            {[1, 2, 3, 4].map((step) => (
+                              <div
+                                key={step}
+                                className={`h-1.5 rounded-full transition-colors ${
+                                  signupPasswordStrength.score >= step
+                                    ? signupPasswordStrength.score >= 4
+                                      ? 'bg-emerald-500'
+                                      : signupPasswordStrength.score === 3
+                                      ? 'bg-cyan-500'
+                                      : signupPasswordStrength.score === 2
+                                      ? 'bg-amber-500'
+                                      : 'bg-rose-500'
+                                    : 'bg-slate-200 dark:bg-slate-700'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                            Força da senha: <strong className="text-slate-700 dark:text-slate-200">{signupPasswordStrength.label}</strong>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2782,7 +3270,15 @@ export default function AuthScreen({
                   {isRecover ? (
                     <button 
                       type="button"
-                      onClick={() => setIsRecover(false)}
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          sessionStorage.removeItem('oportuniza-recovery-in-progress');
+                        }
+                        setIsRecover(false);
+                        setRecoveryStep('request');
+                        setError(null);
+                        setSuccess(null);
+                      }}
                       className="text-[#52A8C7] dark:text-[#52B4D8] text-xs font-bold hover:underline cursor-pointer"
                     >
                       Voltar ao Login

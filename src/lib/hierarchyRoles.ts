@@ -156,16 +156,20 @@ export function resolveUserHierarchyTier(user: any): HierarchyTier {
     return HIERARCHY_TIERS.admin_creator;
   }
 
-  // Tier 2: Atendimento Oportuniza
+  // Tier 2: Atendimento Oportuniza (strictly explicit DB/Admin-assigned role or exact official support address)
+  const officialSupportEmails = new Set([
+    'atendimento@oportuniza.araucaria.br',
+    'suporte@oportuniza.araucaria.br',
+    'atendimento@oportunizaehw.com.br',
+    'suporte@oportunizaehw.com.br'
+  ]);
   if (
     roleLower.includes('atendimento') ||
     roleLower.includes('suporte') ||
     roleLower.includes('moderador') ||
     roleLower.includes('atendente') ||
     roleLower === 'atendimento oportuniza' ||
-    emailLower.includes('atendimento') ||
-    emailLower.includes('suporte') ||
-    emailLower.includes('atendente')
+    officialSupportEmails.has(emailLower)
   ) {
     return HIERARCHY_TIERS.support_service;
   }

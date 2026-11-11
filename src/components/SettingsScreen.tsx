@@ -34,6 +34,8 @@ import { User, ScreenId, Application, Enrollment } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { toast } from '../lib/toast';
 import { useTheme } from '../lib/theme';
+import { validatePasswordStrength } from '../lib/securityValidation';
+import { recordAuditLog } from '../lib/auditLogService';
 
 interface SettingsScreenProps {
   user: User | null;
@@ -232,11 +234,14 @@ export default function SettingsScreen({
     toast.success('🚀 [TESTE PUSH]: Notificação de vaga de TI enviada com sucesso!');
   };
 
+  const passwordStrength = newPassword ? validatePasswordStrength(newPassword, user?.email) : null;
+
   // Change Password Handler
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      toast.error('A senha deve conter no mínimo 6 caracteres.');
+    const check = validatePasswordStrength(newPassword, user?.email);
+    if (!check.isValid) {
+      toast.error(check.error || 'A senha deve conter no mínimo 8 caracteres com letras e números.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -249,8 +254,20 @@ export default function SettingsScreen({
       if (user?.email) {
         const { error } = await supabase.auth.updateUser({ password: newPassword });
         if (error) throw error;
+        try {
+          await recordAuditLog({
+            actor_name: user.name || 'Usuário',
+            actor_email: user.email,
+            actor_role: user.role || 'Candidato',
+            action: 'Alteração de Senha',
+            target_name: user.email,
+            target_type: 'security',
+            details: 'Senha redefinida nas configurações da conta.',
+            status: 'authorized'
+          });
+        } catch {}
       }
-      toast.success('Senha atualizada com sucesso!');
+      toast.success('Senha atualizada com segurança!');
       setNewPassword('');
       setConfirmPassword('');
       setShowPasswordSection(false);
@@ -734,7 +751,7 @@ export default function SettingsScreen({
                   type={showNewPassword ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Digite sua nova senha (mín. 6 dígitos)"
+                  placeholder="Digite sua nova senha (mín. 8 dígitos, letras e números)"
                   className="w-full pl-4 pr-10 py-3 rounded-xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm font-medium outline-none transition-all text-gray-800 dark:text-gray-100"
                 />
                 <button
@@ -745,6 +762,32 @@ export default function SettingsScreen({
                   {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+
+              {passwordStrength && (
+                <div className="space-y-1">
+                  <div className="grid grid-cols-4 gap-1">
+                    {[1, 2, 3, 4].map((step) => (
+                      <div
+                        key={step}
+                        className={`h-1.5 rounded-full transition-colors ${
+                          passwordStrength.score >= step
+                            ? passwordStrength.score >= 4
+                              ? 'bg-emerald-500'
+                              : passwordStrength.score === 3
+                              ? 'bg-cyan-500'
+                              : passwordStrength.score === 2
+                              ? 'bg-amber-500'
+                              : 'bg-rose-500'
+                            : 'bg-gray-200 dark:bg-slate-700'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                    Força: <strong className="text-gray-700 dark:text-gray-200">{passwordStrength.label}</strong>
+                  </p>
+                </div>
+              )}
 
               <input
                 type="password"

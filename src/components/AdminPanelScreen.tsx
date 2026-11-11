@@ -24,6 +24,7 @@ import {
 } from '../lib/blockedAccounts';
 import { HIERARCHY_TIERS, HIERARCHY_LIST, resolveUserHierarchyTier, HierarchyTierKey } from '../lib/hierarchyRoles';
 import { AuditLogEntry, fetchAllAuditLogs, recordAuditLog } from '../lib/auditLogService';
+import { sanitizeExternalUrl } from '../lib/securityValidation';
 
 interface AdminPanelScreenProps {
   user: User;
@@ -3869,11 +3870,16 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
                     {(selectedApplication.cvLink || selectedApplication.cvFileName) && (
                       <div className="mb-4 pb-3 border-b border-slate-800">
                         <strong className="text-white block mb-2">Currículo Anexado</strong>
-                        {selectedApplication.cvLink ? (
-                          <a href={selectedApplication.cvLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[#52A8C7] hover:underline font-medium">
-                            <span className="truncate max-w-[200px]">{selectedApplication.cvLink}</span>
-                          </a>
-                        ) : (
+                        {selectedApplication.cvLink ? (() => {
+                          const safeCvUrl = sanitizeExternalUrl(selectedApplication.cvLink);
+                          return safeCvUrl ? (
+                            <a href={safeCvUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[#52A8C7] hover:underline font-medium">
+                              <span className="truncate max-w-[200px]">{safeCvUrl}</span>
+                            </a>
+                          ) : (
+                            <span className="text-rose-400 font-medium">Link inválido bloqueado por segurança</span>
+                          );
+                        })() : (
                           <span className="text-slate-400">{selectedApplication.cvFileName} (Arquivo)</span>
                         )}
                       </div>

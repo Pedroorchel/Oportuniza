@@ -128,7 +128,6 @@ export async function recordAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestam
   // 2. Try recording in Supabase audit_logs table (if exists)
   try {
     await supabase.from('audit_logs').insert([{
-      id: newLog.id,
       actor_name: newLog.actor_name,
       actor_email: newLog.actor_email,
       actor_role: newLog.actor_role,
@@ -171,7 +170,7 @@ export async function fetchAllAuditLogs(): Promise<AuditLogEntry[]> {
         action: d.action || 'Ação Registrada',
         target_name: d.target_name || '',
         target_type: d.target_type || 'system',
-        details: d.details || '',
+        details: typeof d.details === 'string' ? d.details : JSON.stringify(d.details || ''),
         status: d.status || 'authorized',
         ip_address: d.ip_address || ''
       }));

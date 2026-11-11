@@ -18,11 +18,15 @@ import { User } from '../types';
 import { recordAuditLog } from '../lib/auditLogService';
 import {
   sendVerificationCodeEmail,
+  verifyServerSecurityCode,
   verifySupabaseOtpCode,
   VerificationDeliveryMethod
 } from '../lib/emailVerificationService';
-import { markSession2FAVerified } from '../lib/twoFactorSession';
+import { buildSessionRoleSignature, markSession2FAVerified } from '../lib/twoFactorSession';
 import { resolveUserHierarchyTier } from '../lib/hierarchyRoles';
+import { generateSecureOtpCode } from '../lib/securityValidation';
+
+const MAX_2FA_ATTEMPTS = 5;
 
 interface TwoFactorAuthScreenProps {
   user: User;
@@ -36,7 +40,11 @@ export default function TwoFactorAuthScreen({
   onCancel
 }: TwoFactorAuthScreenProps) {
   const [generatedCode, setGeneratedCode] = useState('');
-  const [digits, setDigits] = useState(['', '', '', '', '', '']);
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [serverVerifiedChallenge, setServerVerifiedChallenge] = useState(false);
+  const [codeExpiresAt, setCodeExpiresAt] = useState<number>(Date.now() + 10 * 60 * 1000);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [digits, setDigits] = useState(['', '', '', '', '', '', '', '']);
   const [timer, setTimer] = useState(60);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -47,9 +55,11 @@ export default function TwoFactorAuthScreen({
     delivered?: boolean;
     message?: string;
   }>({ sending: true });
+  const [sendingSeconds, setSendingSeconds] = useState(0);
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const dispatchedKeyRef = useRef<string | null>(null);
+  const dispatchSeqRef = useRef(0);
 
   const tier = resolveUserHierarchyTier(user);
   const isCompany =
@@ -65,32 +75,59 @@ export default function TwoFactorAuthScreen({
     : 'Conta de Candidato';
 
   const send2FAEmail = async (codeToSend: string) => {
+    const seq = ++dispatchSeqRef.current;
+    setSendingSeconds(0);
     setEmailStatus({ sending: true });
-    const result = await sendVerificationCodeEmail({
-      email: user.email,
-      code: codeToSend,
-      userName: user.name,
-      kind: 'login-2fa',
-      isAdmin: false,
-      accountType: user.accountType
-    });
 
-    if (result.delivered) {
-      setDeliveryMethod(result.deliveryMethod || 'smtp');
-      setEmailStatus({
-        sending: false,
-        delivered: true,
-        message:
-          result.message ||
-          `E-mail de verificação enviado via ${result.providerLabel || 'oportunizahw@gmail.com'} para ${user.email}. Confira sua caixa de entrada ou Spam.`
+    try {
+      const result = await sendVerificationCodeEmail({
+        email: user.email,
+        code: codeToSend,
+        userName: user.name,
+        kind: 'login-2fa',
+        isAdmin: false,
+        accountType: user.accountType
       });
-    } else {
+
+      if (seq !== dispatchSeqRef.current) return;
+
+      if (result.deliveryMethod) {
+        setDeliveryMethod(result.deliveryMethod);
+      }
+
+      if (result.delivered) {
+        setDeliveryMethod(result.deliveryMethod || 'smtp');
+        setChallengeId(result.challengeId || null);
+        setServerVerifiedChallenge(Boolean(result.serverVerified && result.challengeId));
+        if (typeof result.expiresInSeconds === 'number' && result.expiresInSeconds > 0) {
+          setCodeExpiresAt(Date.now() + result.expiresInSeconds * 1000);
+        } else {
+          setCodeExpiresAt(Date.now() + 10 * 60 * 1000);
+        }
+        setEmailStatus({
+          sending: false,
+          delivered: true,
+          message:
+            result.message ||
+            `E-mail de verificação enviado via ${result.providerLabel || 'oportunizahw@gmail.com'} para ${user.email}. Confira sua caixa de entrada ou Spam.`
+        });
+      } else {
+        setTimer(0);
+        setEmailStatus({
+          sending: false,
+          delivered: false,
+          message:
+            result.error ||
+            `Não foi possível enviar o código de verificação para ${user.email} agora. Tente reenviar em instantes.`
+        });
+      }
+    } catch (err: any) {
+      if (seq !== dispatchSeqRef.current) return;
+      setTimer(0);
       setEmailStatus({
         sending: false,
         delivered: false,
-        message:
-          result.error ||
-          `Não foi possível enviar o código de verificação para ${user.email} agora. Tente reenviar em instantes.`
+        message: err?.message || `Erro inesperado ao enviar código para ${user.email}. Tente reenviar.`
       });
     }
   };
@@ -104,16 +141,20 @@ export default function TwoFactorAuthScreen({
       dispatchedKeyRef.current = dispatchKey;
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = generateSecureOtpCode();
     setGeneratedCode(code);
+    setChallengeId(null);
+    setServerVerifiedChallenge(false);
+    setCodeExpiresAt(Date.now() + 10 * 60 * 1000);
+    setFailedAttempts(0);
     setTimer(60);
-    setDigits(['', '', '', '', '', '']);
+    setDigits(['', '', '', '', '', '', '', '']);
     setErrorMsg(null);
     setDeliveryMethod('smtp');
 
     setTimeout(() => {
       inputRefs.current[0]?.focus();
-    }, 100);
+    }, 80);
 
     send2FAEmail(code);
   };
@@ -131,11 +172,67 @@ export default function TwoFactorAuthScreen({
     return () => clearInterval(interval);
   }, [timer]);
 
+  useEffect(() => {
+    if (!emailStatus.sending) {
+      setSendingSeconds(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setSendingSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [emailStatus.sending]);
+
+  const registerFailedAttempt = async (customMessage?: string) => {
+    const nextAttempts = failedAttempts + 1;
+    setFailedAttempts(nextAttempts);
+    setDigits(['', '', '', '', '', '', '', '']);
+    setIsVerifying(false);
+
+    if (nextAttempts >= MAX_2FA_ATTEMPTS) {
+      setTimer(0);
+      setErrorMsg('Muitas tentativas incorretas (5/5). Clique em "Reenviar Código" para gerar um novo código.');
+      try {
+        await recordAuditLog({
+          actor_name: user.name || 'Usuário',
+          actor_email: user.email || '',
+          actor_role: user.role || accountBadgeLabel,
+          action: 'Tentativas 2FA Excedidas',
+          target_name: user.email || 'Portal Oportuniza',
+          target_type: 'security',
+          details: `5 tentativas inválidas no código 2FA para ${user.email}. Código atual invalidado.`,
+          status: 'warning'
+        });
+      } catch {
+        // Ignore
+      }
+    } else {
+      const remaining = MAX_2FA_ATTEMPTS - nextAttempts;
+      setErrorMsg(
+        customMessage ||
+          `Código incorreto. Restam ${remaining} ${remaining === 1 ? 'tentativa' : 'tentativas'}.`
+      );
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 60);
+    }
+  };
+
   const verifyCode = async (codeToVerify: string) => {
     if (isVerifying || isSuccess) return;
+    if (failedAttempts >= MAX_2FA_ATTEMPTS) {
+      setErrorMsg('Este código foi invalidado após 5 tentativas incorretas. Clique em "Reenviar Código".');
+      return;
+    }
+    if (Date.now() > codeExpiresAt) {
+      setTimer(0);
+      setErrorMsg('Este código expirou após 10 minutos. Clique em "Reenviar Código" para receber um novo.');
+      return;
+    }
+
     const cleanCode = codeToVerify.trim();
-    if (cleanCode.length !== 6) {
-      setErrorMsg('Digite todos os 6 dígitos do código enviado para o seu e-mail.');
+    if (cleanCode.length !== 8) {
+      setErrorMsg('Digite todos os 8 dígitos do código enviado para o seu e-mail.');
       return;
     }
 
@@ -153,17 +250,49 @@ export default function TwoFactorAuthScreen({
           verifiedUserId = otpCheck.userId;
         }
       } else {
-        setIsVerifying(false);
-        setErrorMsg('Código 2FA incorreto ou expirado. Confira o código recebido no e-mail e tente novamente.');
+        await registerFailedAttempt(otpCheck.error || 'Código 2FA incorreto ou expirado. Confira o e-mail e tente novamente.');
+        return;
+      }
+    } else if (serverVerifiedChallenge && challengeId) {
+      const serverCheck = await verifyServerSecurityCode({
+        challengeId,
+        email: user.email,
+        code: cleanCode,
+        kind: 'login-2fa'
+      });
+      if (serverCheck.verified) {
+        isMatch = true;
+      } else {
+        if (serverCheck.locked) {
+          setFailedAttempts(MAX_2FA_ATTEMPTS);
+          setTimer(0);
+          setDigits(['', '', '', '', '', '', '', '']);
+          setIsVerifying(false);
+          setErrorMsg(serverCheck.error || 'Código bloqueado após 5 tentativas. Clique em "Reenviar Código".');
+          return;
+        }
+        if (serverCheck.expired) {
+          setTimer(0);
+          setDigits(['', '', '', '', '', '', '', '']);
+          setIsVerifying(false);
+          setErrorMsg(serverCheck.error || 'Código expirado. Clique em "Reenviar Código".');
+          return;
+        }
+        await registerFailedAttempt(serverCheck.error);
         return;
       }
     } else {
-      await new Promise((r) => setTimeout(r, 350));
+      await new Promise((r) => setTimeout(r, 150));
       isMatch = Boolean(generatedCode) && cleanCode === generatedCode;
+      if (!isMatch) {
+        await registerFailedAttempt();
+        return;
+      }
     }
 
     if (isMatch) {
-      markSession2FAVerified(verifiedUserId, user.email || '');
+      const roleSig = buildSessionRoleSignature(user.role, Boolean(user.isAdmin));
+      markSession2FAVerified(verifiedUserId, user.email || '', roleSig);
       setIsSuccess(true);
 
       try {
@@ -183,21 +312,18 @@ export default function TwoFactorAuthScreen({
 
       setTimeout(() => {
         onVerified();
-      }, 550);
-    } else {
-      setIsVerifying(false);
-      setErrorMsg('Código de verificação incorreto. Confira o código de 6 dígitos enviado para seu e-mail.');
+      }, 300);
     }
   };
 
   const handleDigitChange = (index: number, value: string) => {
     const cleanValue = value.replace(/\D/g, '');
 
-    if (cleanValue.length >= 6) {
-      const pastedDigits = cleanValue.substring(0, 6).split('');
+    if (cleanValue.length >= 8) {
+      const pastedDigits = cleanValue.substring(0, 8).split('');
       setDigits(pastedDigits);
       setErrorMsg(null);
-      inputRefs.current[5]?.focus();
+      inputRefs.current[7]?.focus();
       verifyCode(pastedDigits.join(''));
       return;
     }
@@ -207,12 +333,12 @@ export default function TwoFactorAuthScreen({
     setDigits(newDigits);
     setErrorMsg(null);
 
-    if (cleanValue && index < 5) {
+    if (cleanValue && index < 7) {
       inputRefs.current[index + 1]?.focus();
     }
 
     const fullCode = newDigits.join('');
-    if (fullCode.length === 6) {
+    if (fullCode.length === 8) {
       verifyCode(fullCode);
     }
   };
@@ -261,7 +387,7 @@ export default function TwoFactorAuthScreen({
               Verificação em Duas Etapas
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs mx-auto">
-              Por segurança, toda tentativa de login exige a confirmação do código de 6 dígitos enviado para o seu e-mail.
+              Por segurança, toda tentativa de login exige a confirmação do código de 8 dígitos enviado para o seu e-mail.
             </p>
           </div>
         </div>
@@ -276,7 +402,11 @@ export default function TwoFactorAuthScreen({
           {emailStatus.sending ? (
             <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-0.5">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-[#52A8C7] shrink-0" />
-              <span>Enviando código de verificação para seu e-mail...</span>
+              <span>
+                {sendingSeconds >= 3
+                  ? `Finalizando entrega no Gmail (${sendingSeconds}s)...`
+                  : 'Enviando código de 8 dígitos para seu e-mail...'}
+              </span>
             </div>
           ) : emailStatus.delivered === false ? (
             <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-800 dark:text-amber-200 text-[11px] font-medium flex items-start gap-2">
@@ -291,9 +421,9 @@ export default function TwoFactorAuthScreen({
           )}
         </div>
 
-        {/* 6 Digit OTP Boxes */}
+        {/* 8 Digit OTP Boxes */}
         <div className="flex flex-col gap-3">
-          <div className="flex justify-center gap-2 sm:gap-2.5">
+          <div className="flex justify-center gap-1.5 sm:gap-2 w-full">
             {digits.map((digit, idx) => (
               <input
                 key={idx}
@@ -302,12 +432,12 @@ export default function TwoFactorAuthScreen({
                 }}
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={8}
                 value={digit}
                 onChange={(e) => handleDigitChange(idx, e.target.value)}
                 onPaste={(e) => {
                   const pasted = e.clipboardData.getData('text').replace(/\D/g, '');
-                  if (pasted.length >= 6) {
+                  if (pasted.length >= 8) {
                     e.preventDefault();
                     handleDigitChange(idx, pasted);
                   }
@@ -315,7 +445,7 @@ export default function TwoFactorAuthScreen({
                 onKeyDown={(e) => handleKeyDown(idx, e)}
                 disabled={isVerifying || isSuccess}
                 aria-label={`Dígito ${idx + 1} do código 2FA`}
-                className={`w-11 sm:w-12 h-14 bg-slate-50 dark:bg-slate-950 text-center font-mono font-black text-xl rounded-xl border transition-all focus:outline-hidden ${
+                className={`flex-1 min-w-0 max-w-[42px] h-12 sm:h-14 bg-slate-50 dark:bg-slate-950 text-center font-mono font-black text-base sm:text-xl rounded-xl border transition-all focus:outline-hidden ${
                   errorMsg
                     ? 'border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20'
                     : digit
@@ -352,7 +482,7 @@ export default function TwoFactorAuthScreen({
             <button
               type="button"
               onClick={() => verifyCode(digits.join(''))}
-              disabled={isVerifying || digits.join('').length < 6}
+              disabled={isVerifying || digits.join('').length < 8}
               className="w-full py-3.5 px-4 bg-[#52A8C7] hover:bg-[#3d90ad] disabled:opacity-45 text-white font-bold text-sm rounded-2xl transition-all cursor-pointer shadow-lg shadow-[#52A8C7]/20 flex items-center justify-center gap-2 active:scale-[0.98]"
             >
               {isVerifying ? (

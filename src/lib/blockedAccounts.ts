@@ -81,6 +81,72 @@ export function getAccountBlockReason(identifier: { id?: string; email?: string 
 }
 
 /**
+ * Checks whether an email already exists or is blocked without leaking full user rows (uses SECURITY DEFINER RPC first).
+ */
+export async function checkEmailRegisteredOrBlocked(email: string): Promise<{
+  exists: boolean;
+  isBlocked: boolean;
+  blockReason?: string;
+}> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return { exists: false, isBlocked: false };
+
+  const localEmails = getLocalBlockedEmails();
+  if (localEmails.includes(cleanEmail)) {
+    return {
+      exists: true,
+      isBlocked: true,
+      blockReason: getAccountBlockReason({ email: cleanEmail })
+    };
+  }
+
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('check_email_status', {
+      target_email: cleanEmail
+    });
+    if (!rpcErr && rpcData && typeof rpcData === 'object') {
+      const payload = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+      if (payload) {
+        const isBlocked = Boolean(payload.is_blocked);
+        const blockReason = typeof payload.block_reason === 'string' && payload.block_reason.trim()
+          ? payload.block_reason.trim()
+          : undefined;
+        if (isBlocked) {
+          const reasons = getLocalBlockedReasons();
+          if (blockReason) reasons[cleanEmail] = blockReason;
+          saveLocalBlocked([...localEmails, cleanEmail], getLocalBlockedIds(), reasons);
+        }
+        return {
+          exists: Boolean(payload.exists),
+          isBlocked,
+          blockReason
+        };
+      }
+    }
+  } catch {
+    // RPC not installed yet; fall back to restricted users select
+  }
+
+  try {
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id, is_blocked, block_reason, status, role, cargo, bio, experience, education')
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+
+    if (existingUser) {
+      const blocked = isUserRecordBlocked(existingUser);
+      const reason = extractBlockReasonFromRecord(existingUser) || undefined;
+      return { exists: true, isBlocked: blocked, blockReason: reason };
+    }
+  } catch {
+    // RLS restricted before auth; safe default
+  }
+
+  return { exists: false, isBlocked: false };
+}
+
+/**
  * Robustly fetches the block reason from database or local storage cache
  */
 export async function fetchAccountBlockReason(identifier: { id?: string; email?: string }): Promise<string> {
@@ -90,6 +156,25 @@ export async function fetchAccountBlockReason(identifier: { id?: string; email?:
 
   if (email && localReasons[email]) return localReasons[email];
   if (id && localReasons[id]) return localReasons[id];
+
+  // Try RLS-safe RPC first when email is known
+  if (email) {
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('check_email_status', {
+        target_email: email
+      });
+      const payload = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+      if (!rpcErr && payload?.block_reason) {
+        const reason = String(payload.block_reason).trim();
+        localReasons[email] = reason;
+        if (id) localReasons[id] = reason;
+        localStorage.setItem(BLOCKED_REASONS_KEY, JSON.stringify(localReasons));
+        return reason;
+      }
+    } catch {
+      // Fallback to direct query below
+    }
+  }
 
   // Try checking in Supabase
   try {
@@ -198,13 +283,38 @@ export async function isAccountBlocked(identifier: { id?: string; email?: string
     return true;
   }
 
-  // 2. Database verification in 'users' table
+  // 2. RLS-safe RPC verification by email
+  if (cleanEmail) {
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('check_email_status', {
+        target_email: cleanEmail
+      });
+      const payload = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+      if (!rpcErr && payload?.is_blocked) {
+        const reasons = getLocalBlockedReasons();
+        if (payload.block_reason) {
+          reasons[cleanEmail] = String(payload.block_reason).trim();
+          if (userId) reasons[userId] = String(payload.block_reason).trim();
+        }
+        saveLocalBlocked(
+          [...localEmails, cleanEmail],
+          userId ? [...localIds, userId] : localIds,
+          reasons
+        );
+        return true;
+      }
+    } catch {
+      // Fallback to direct query when RPC is not installed yet
+    }
+  }
+
+  // 3. Database verification in 'users' table (when authenticated or legacy schema)
   try {
     // Check by ID if provided
     if (userId) {
       const { data: byIdData, error: byIdErr } = await supabase
         .from('users')
-        .select('*')
+        .select('id, email, block_reason, bio, experience, education, is_blocked, status, role, cargo')
         .eq('id', userId);
 
       if (!byIdErr && byIdData && byIdData.length > 0) {
@@ -230,7 +340,7 @@ export async function isAccountBlocked(identifier: { id?: string; email?: string
     if (cleanEmail) {
       const { data: byEmailData, error: byEmailErr } = await supabase
         .from('users')
-        .select('*')
+        .select('id, email, block_reason, bio, experience, education, is_blocked, status, role, cargo')
         .ilike('email', cleanEmail);
 
       if (!byEmailErr && byEmailData && byEmailData.length > 0) {

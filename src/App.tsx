@@ -13,7 +13,6 @@ import SidebarComponent from './components/Sidebar';
 import DetailsScreen from './components/DetailsScreen';
 import LandingScreen from './components/LandingScreen';
 import BioScreen from './components/BioScreen';
-import UserAuthScreens from './components/UserAuthScreens';
 import AuthScreen from './components/AuthScreen';
 import AdminPanelScreen from './components/AdminPanelScreen';
 import Admin2FAScreen from './components/Admin2FAScreen';
@@ -36,7 +35,14 @@ import CoursePlayerScreen from './components/CoursePlayerScreen';
 import SettingsScreen from './components/SettingsScreen';
 import AtendimentoPanelScreen from './components/AtendimentoPanelScreen';
 import { resolveUserHierarchyTier } from './lib/hierarchyRoles';
-import { isSession2FAVerified, clearSession2FAVerification } from './lib/twoFactorSession';
+import {
+  buildSessionRoleSignature,
+  checkSession2FAStatus,
+  isSession2FAVerified,
+  clearSession2FAVerification,
+  touchSession2FAActivity
+} from './lib/twoFactorSession';
+import { sanitizeExternalUrl } from './lib/securityValidation';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('landing');
@@ -224,11 +230,21 @@ export default function App() {
           )
         );
 
-        if (isUserAdmin) {
+        if (isUserAdmin && user) {
           e.preventDefault();
-          setUser(prev => prev ? { ...prev, isAdmin: true } : prev);
+          const roleSig = buildSessionRoleSignature(user.role || 'Administrador', true);
+          const verified = isSession2FAVerified(user.id, user.email, {
+            isPrivileged: true,
+            expectedRoleSignature: roleSig
+          });
+          setIsAdmin2FAVerified(verified);
+          setUser(prev => (prev ? { ...prev, isAdmin: true } : prev));
           setCurrentScreen('admin');
-          toast.info('Acessando painel de administração...');
+          toast.info(
+            verified
+              ? 'Acessando painel de administração...'
+              : 'Verificação em duas etapas obrigatória para acessar o Painel Administrativo.'
+          );
         }
       }
     };
@@ -420,6 +436,60 @@ export default function App() {
     };
   }, [user]);
 
+  // Security Watcher: Enforce 2FA inactivity timeout & max session age without disrupting normal navigation
+  useEffect(() => {
+    if (!user || (!user.isAdmin && user.status === 'pending')) return;
+    if (!isLogin2FAVerified && !isAdmin2FAVerified) return;
+
+    const tier = resolveUserHierarchyTier(user);
+    const isPrivilegedSession = Boolean(user.isAdmin) || tier.id === 'support_service';
+    const expectedSig = buildSessionRoleSignature(
+      user.role || (user.isAdmin ? 'Administrador' : 'Candidato'),
+      Boolean(user.isAdmin)
+    );
+
+    touchSession2FAActivity();
+    let lastTouchedAt = Date.now();
+
+    const recordUserActivity = () => {
+      const now = Date.now();
+      if (now - lastTouchedAt >= 15000) {
+        lastTouchedAt = now;
+        touchSession2FAActivity();
+      }
+    };
+
+    const verifyTimeoutStatus = () => {
+      const status = checkSession2FAStatus(user.id, user.email, {
+        isPrivileged: isPrivilegedSession,
+        expectedRoleSignature: expectedSig
+      });
+      if (!status.valid) {
+        setIsLogin2FAVerified(false);
+        setIsAdmin2FAVerified(false);
+        toast.warning(
+          status.reason === 'idle'
+            ? 'Sessão bloqueada por inatividade. Confirme novamente o código 2FA.'
+            : 'Sua sessão de segurança expirou. Confirme novamente o código 2FA.'
+        );
+      }
+    };
+
+    window.addEventListener('pointerdown', recordUserActivity, { passive: true });
+    window.addEventListener('keydown', recordUserActivity, { passive: true });
+    window.addEventListener('touchstart', recordUserActivity, { passive: true });
+    window.addEventListener('scroll', recordUserActivity, { passive: true });
+    const interval = setInterval(verifyTimeoutStatus, 30000);
+
+    return () => {
+      window.removeEventListener('pointerdown', recordUserActivity);
+      window.removeEventListener('keydown', recordUserActivity);
+      window.removeEventListener('touchstart', recordUserActivity);
+      window.removeEventListener('scroll', recordUserActivity);
+      clearInterval(interval);
+    };
+  }, [user, isLogin2FAVerified, isAdmin2FAVerified]);
+
   useEffect(() => {
     const initFailsafe = setTimeout(() => {
       setIsInitializing(false);
@@ -449,8 +519,15 @@ export default function App() {
         const authProvider = String(supabaseUser.app_metadata?.provider || 'email').toLowerCase();
         const isOAuthSession = authProvider !== '' && authProvider !== 'email';
 
-        // Avoid interrupting an active email+password 6-digit registration code verification in AuthScreen
-        if (typeof window !== 'undefined' && cleanEmail && sessionStorage.getItem('oportuniza-reg-in-progress') === cleanEmail) {
+        // Avoid interrupting an active email+password 8-digit registration or recovery code verification in AuthScreen
+        if (
+          typeof window !== 'undefined' &&
+          cleanEmail &&
+          (
+            sessionStorage.getItem('oportuniza-reg-in-progress') === cleanEmail ||
+            sessionStorage.getItem('oportuniza-recovery-in-progress') === cleanEmail
+          )
+        ) {
           setIsInitializing(false);
           return;
         }
@@ -582,8 +659,6 @@ export default function App() {
                 isCompanyAccount = true;
               } else if (explicitType === 'candidate' || roleLower === 'candidato' || roleLower === 'estudante') {
                 isCompanyAccount = false;
-              } else if (cachedUser?.accountType === 'company' && cachedUser?.email?.toLowerCase() === cleanEmail) {
-                isCompanyAccount = true;
               } else if (companyData && companyData.user_id === supabaseUser.id && (data?.account_type === 'company' || data?.role === 'Empresa')) {
                 isCompanyAccount = true;
               }
@@ -649,11 +724,15 @@ export default function App() {
                 cargo: userCargo
               };
 
-              const verifiedForSession = isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email);
+              const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
+              const isPrivilegedLoaded = isAdminUser || loadedTier.id === 'support_service';
+              const verifiedForSession = isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email, {
+                isPrivileged: isPrivilegedLoaded,
+                expectedRoleSignature: buildSessionRoleSignature(dbLoadedUser.role, isAdminUser)
+              });
               setIsLogin2FAVerified(verifiedForSession);
               setIsAdmin2FAVerified(isAdminUser ? verifiedForSession : false);
               setUser(dbLoadedUser);
-              const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
               if (!isAdminUser && dbLoadedUser.status === 'pending') {
                 setCurrentScreen('register');
               } else if (isAdminUser) {
@@ -740,7 +819,13 @@ export default function App() {
                 is2FAEnabled: true,
                 status: isActivatedNew ? 'active' : 'pending'
               };
-              const verifiedForSession = isSession2FAVerified(resolvedInitialUser.id, resolvedInitialUser.email);
+              const verifiedForSession = isSession2FAVerified(resolvedInitialUser.id, resolvedInitialUser.email, {
+                isPrivileged: isAdminEmail,
+                expectedRoleSignature: buildSessionRoleSignature(
+                  resolvedInitialUser.role || (isAdminEmail ? 'Administrador' : 'Candidato'),
+                  isAdminEmail
+                )
+              });
               setIsLogin2FAVerified(verifiedForSession);
               setIsAdmin2FAVerified(isAdminEmail ? verifiedForSession : false);
               setUser(resolvedInitialUser);
@@ -771,6 +856,9 @@ export default function App() {
 
       } else {
         // No session exists, clear everything to maintain strict isolation
+        if (event === 'SIGNED_OUT') {
+          clearSession2FAVerification();
+        }
         setIsLogin2FAVerified(false);
         setIsAdmin2FAVerified(false);
         setUser(null);
@@ -837,6 +925,7 @@ export default function App() {
     try {
       clearSession2FAVerification();
       sessionStorage.removeItem('oportuniza-reg-in-progress');
+      sessionStorage.removeItem('oportuniza-recovery-in-progress');
       localStorage.removeItem('oportuniza-current-user');
       localStorage.removeItem('oportuniza-applications');
       localStorage.removeItem('oportuniza-enrollments');
@@ -890,8 +979,9 @@ export default function App() {
     }
 
     // Tentativas progressivas de payload para suportar qualquer versão do schema da tabela applications no Supabase
+    const sanitizedCvLink = cvInfo?.link ? sanitizeExternalUrl(cvInfo.link) || undefined : undefined;
     const candidateFullInfo = `${user.name || 'Usuário'} | ${user.email} | ${user.phone || ''}`;
-    const cvInfoString = cvInfo?.link ? `Link: ${cvInfo.link}` : (cvInfo?.fileName ? `Arquivo: ${cvInfo.fileName}` : '');
+    const cvInfoString = sanitizedCvLink ? `Link: ${sanitizedCvLink}` : (cvInfo?.fileName ? `Arquivo: ${cvInfo.fileName}` : '');
 
     const payloadsToTry = [
       // 1. Schema completo
@@ -905,7 +995,7 @@ export default function App() {
         candidate_name: candidateFullInfo,
         candidate_email: user.email,
         candidate_phone: user.phone || null,
-        cv_link: cvInfo?.link || null,
+        cv_link: sanitizedCvLink || null,
         cv_file_name: cvInfo?.fileName || null
       },
       // 2. Sem candidate_email / candidate_phone (tabelas intermediárias)
@@ -917,7 +1007,7 @@ export default function App() {
         applied_date: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
         status: 'Em análise',
         candidate_name: candidateFullInfo,
-        cv_link: cvInfo?.link || null,
+        cv_link: sanitizedCvLink || null,
         cv_file_name: cvInfo?.fileName || null
       },
       // 3. Sem cv_file_name (armazena informação do arquivo dentro de cv_link ou candidate_name)
@@ -929,7 +1019,7 @@ export default function App() {
         applied_date: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
         status: 'Em análise',
         candidate_name: cvInfoString ? `${candidateFullInfo} | ${cvInfoString}` : candidateFullInfo,
-        cv_link: cvInfo?.link || (cvInfo?.fileName ? `Arquivo: ${cvInfo.fileName}` : null)
+        cv_link: sanitizedCvLink || (cvInfo?.fileName ? `Arquivo: ${cvInfo.fileName}` : null)
       },
       // 4. Apenas colunas básicas
       {
@@ -1428,7 +1518,26 @@ export default function App() {
   };
 
   const handleScreenNavigation = (screen: ScreenId) => {
-    console.log('Navigating to screen:', screen);
+    const publicScreens: ScreenId[] = ['landing', 'bio', 'privacy', 'terms', 'login', 'register'];
+    if (!user && !publicScreens.includes(screen)) {
+      toast.warning('Faça login para acessar esta área.');
+      setCurrentScreen('login');
+      return;
+    }
+
+    if (screen === 'admin' && !user?.isAdmin) {
+      toast.error('Acesso restrito a administradores autorizados.');
+      return;
+    }
+
+    if (screen === 'atendimento') {
+      const tier = resolveUserHierarchyTier(user);
+      if (tier.id !== 'admin_creator' && tier.id !== 'support_service') {
+        toast.error('Acesso restrito à equipe de Atendimento Oportuniza.');
+        return;
+      }
+    }
+
     setHistory((prev) => {
       if (prev[prev.length - 1] === currentScreen) {
         return prev;
@@ -1535,12 +1644,16 @@ export default function App() {
                   status: loggedInUser.status === 'pending' ? 'pending' : 'active',
                   is2FAEnabled: true
                 };
-                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email);
+                const tier = resolveUserHierarchyTier(nextUser);
+                const isPrivilegedSession = Boolean(nextUser.isAdmin) || tier.id === 'support_service';
+                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email, {
+                  isPrivileged: isPrivilegedSession,
+                  expectedRoleSignature: buildSessionRoleSignature(nextUser.role, Boolean(nextUser.isAdmin))
+                });
                 setIsLogin2FAVerified(verifiedNow);
                 setIsAdmin2FAVerified(nextUser.isAdmin ? verifiedNow : false);
                 setUser(nextUser);
 
-                const tier = resolveUserHierarchyTier(nextUser);
                 if (nextUser.isAdmin) {
                   setCurrentScreen('admin');
                 } else if (nextUser.status === 'pending') {
@@ -1552,7 +1665,10 @@ export default function App() {
                 }
               }}
               onAdminLoginSuccess={(adminUser) => {
-                const verifiedNow = isSession2FAVerified(adminUser.id, adminUser.email);
+                const verifiedNow = isSession2FAVerified(adminUser.id, adminUser.email, {
+                  isPrivileged: true,
+                  expectedRoleSignature: buildSessionRoleSignature(adminUser.role || 'Administrador', true)
+                });
                 setIsLogin2FAVerified(false);
                 setIsAdmin2FAVerified(verifiedNow);
                 setUser(adminUser);
@@ -1575,12 +1691,16 @@ export default function App() {
               onSignOut={handleSignOut}
               onLoginSuccess={(loggedInUser) => {
                 const nextUser: User = { ...loggedInUser, status: 'active', is2FAEnabled: true };
-                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email);
+                const tier = resolveUserHierarchyTier(nextUser);
+                const isPrivilegedSession = Boolean(nextUser.isAdmin) || tier.id === 'support_service';
+                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email, {
+                  isPrivileged: isPrivilegedSession,
+                  expectedRoleSignature: buildSessionRoleSignature(nextUser.role, Boolean(nextUser.isAdmin))
+                });
                 setIsLogin2FAVerified(verifiedNow);
                 setIsAdmin2FAVerified(nextUser.isAdmin ? verifiedNow : false);
                 setUser(nextUser);
 
-                const tier = resolveUserHierarchyTier(nextUser);
                 if (nextUser.isAdmin) {
                   setCurrentScreen('admin');
                 } else if (tier.id === 'support_service') {
@@ -2419,13 +2539,18 @@ export default function App() {
           )}
 
           {/* Central de Atendimento Oportuniza (🎧 Nível 2) */}
-          {currentScreen === 'atendimento' && (
-            <AtendimentoPanelScreen
-              user={user || { name: 'Atendimento Oportuniza', email: 'suporte@oportuniza.araucaria.br', role: 'Atendimento Oportuniza' }}
-              onLogout={handleSignOut}
-              onNavigateHome={() => handleScreenNavigation('home')}
-            />
-          )}
+          {currentScreen === 'atendimento' &&
+            user &&
+            (() => {
+              const tier = resolveUserHierarchyTier(user);
+              return tier.id === 'admin_creator' || tier.id === 'support_service';
+            })() && (
+              <AtendimentoPanelScreen
+                user={user}
+                onLogout={handleSignOut}
+                onNavigateHome={() => handleScreenNavigation('home')}
+              />
+            )}
 
           {/* Messages / List */}
           {currentScreen === 'messages' && (

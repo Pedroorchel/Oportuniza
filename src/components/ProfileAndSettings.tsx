@@ -40,6 +40,8 @@ import { toast } from '../lib/toast';
 import { useTheme } from '../lib/theme';
 import { isAccountBlocked } from '../lib/blockedAccounts';
 import { saveCompanyProfile } from '../lib/companyService';
+import { validatePasswordStrength } from '../lib/securityValidation';
+import { recordAuditLog } from '../lib/auditLogService';
 
 interface ProfileAndSettingsProps {
   user: User | null;
@@ -367,8 +369,9 @@ export default function ProfileAndSettings({
   // Update password
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      toast.error('A senha deve conter no mínimo 6 caracteres.');
+    const check = validatePasswordStrength(newPassword, user?.email);
+    if (!check.isValid) {
+      toast.error(check.error || 'A senha deve conter no mínimo 8 caracteres com letras e números.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -379,13 +382,26 @@ export default function ProfileAndSettings({
     setIsUpdatingPassword(true);
     try {
       if (user?.email) {
-        await supabase.auth.updateUser({ password: newPassword });
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) throw error;
+        try {
+          await recordAuditLog({
+            actor_name: user.name || 'Usuário',
+            actor_email: user.email,
+            actor_role: user.role || 'Candidato',
+            action: 'Alteração de Senha',
+            target_name: user.email,
+            target_type: 'security',
+            details: 'Senha redefinida pelo perfil com política forte.',
+            status: 'authorized'
+          });
+        } catch {}
       }
-      toast.success('Senha atualizada com sucesso!');
+      toast.success('Senha atualizada com segurança!');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err) {
-      toast.error('Não foi possível alterar a senha no momento.');
+    } catch (err: any) {
+      toast.error(err?.message || 'Não foi possível alterar a senha no momento.');
     } finally {
       setIsUpdatingPassword(false);
     }

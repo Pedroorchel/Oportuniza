@@ -12,6 +12,7 @@ import { User, Job, Application } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { toast } from '../lib/toast';
 import { mockJobs, deleteJobPermanently } from '../data';
+import { sanitizeExternalUrl } from '../lib/securityValidation';
 
 interface CompanyDashboardScreenProps {
   user: User;
@@ -1164,16 +1165,26 @@ export default function CompanyDashboardScreen({ user, onLogout, onUpdateUser }:
                         <option value="Reprovado">Reprovado</option>
                       </select>
 
-                      {app.cvLink && (
-                        <a
-                          href={app.cvLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-1.5 bg-[#52A8C7]/10 hover:bg-[#52A8C7]/20 text-[#52A8C7] text-xs font-bold rounded-xl transition-colors flex items-center gap-1"
-                        >
-                          <FileText className="w-3.5 h-3.5" /> Currículo
-                        </a>
-                      )}
+                      {app.cvLink && (() => {
+                        const safeCvUrl = sanitizeExternalUrl(app.cvLink);
+                        return safeCvUrl ? (
+                          <a
+                            href={safeCvUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-[#52A8C7]/10 hover:bg-[#52A8C7]/20 text-[#52A8C7] text-xs font-bold rounded-xl transition-colors flex items-center gap-1"
+                          >
+                            <FileText className="w-3.5 h-3.5" /> Currículo
+                          </a>
+                        ) : (
+                          <span
+                            className="px-3 py-1.5 bg-rose-500/10 text-rose-500 text-xs font-bold rounded-xl flex items-center gap-1"
+                            title="Link bloqueado pela política de segurança"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" /> Link inválido bloqueado
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}

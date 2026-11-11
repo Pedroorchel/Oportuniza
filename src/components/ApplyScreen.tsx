@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Send, CheckCircle, UploadCloud, Link as LinkIcon, FileText, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send, CheckCircle, UploadCloud, Link as LinkIcon, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { Job } from '../types';
+import { sanitizeExternalUrl } from '../lib/securityValidation';
+
+const MAX_CV_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 
 interface ApplyScreenProps {
   job: Job;
@@ -15,6 +18,7 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -34,9 +38,34 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
     };
   }, []);
 
+  const validateAndSelectFile = (file: File) => {
+    setFormError(null);
+    const validExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp'];
+    const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
+
+    const isValidType =
+      file.type.includes('pdf') ||
+      file.type.includes('word') ||
+      file.type.includes('msword') ||
+      file.type.includes('image/') ||
+      validExtensions.includes(fileExtension);
+
+    if (!isValidType) {
+      setFormError('Formato de arquivo não suportado. Use apenas PDF, DOC, DOCX ou Imagem.');
+      return;
+    }
+
+    if (file.size > MAX_CV_FILE_SIZE_BYTES) {
+      setFormError('O arquivo ultrapassa o limite máximo de segurança de 5MB.');
+      return;
+    }
+
+    setCvFile(file);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setCvFile(e.target.files[0]);
+      validateAndSelectFile(e.target.files[0]);
     }
   };
 
@@ -58,33 +87,26 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
     setIsDragging(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      const validExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp'];
-      const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
-      
-      const isValidType = file.type.includes('pdf') || 
-                          file.type.includes('word') || 
-                          file.type.includes('msword') || 
-                          file.type.includes('image/') || 
-                          validExtensions.includes(fileExtension);
-                          
-      if (isValidType) {
-        setCvFile(file);
-      } else {
-        alert('Formato de arquivo não suportado. Use PDF, DOCX ou Imagem.');
-      }
+      validateAndSelectFile(e.dataTransfer.files[0]);
     }
+  };
+
+  const getSanitizedCvLink = (): string | undefined => {
+    const raw = cvLink.trim();
+    if (!raw) return undefined;
+    return sanitizeExternalUrl(raw) || undefined;
   };
 
   const getWhatsAppLink = () => {
     const phone = '5541996502358';
     const baseUrl = `${window.location.origin}${window.location.pathname}`.replace(/\/+$/, '');
     const jobLink = `${baseUrl}/?job=${job.id}`;
+    const safeLink = getSanitizedCvLink();
     let text = `Olá! Gostaria de me candidatar para a vaga de *${job.title}* na empresa *${job.company}*.\n\n`;
     text += `*Link da Vaga:* ${jobLink}\n`;
     
-    if (cvLink) {
-      text += `*Link do meu Currículo:* ${cvLink}\n`;
+    if (safeLink) {
+      text += `*Link do meu Currículo:* ${safeLink}\n`;
     }
     
     if (cvFile) {
@@ -96,10 +118,23 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
 
   const handleConfirmApply = async () => {
     if (isSubmitting) return;
+    setFormError(null);
+
+    const rawLink = cvLink.trim();
+    let safeLink: string | undefined;
+    if (rawLink) {
+      const sanitized = sanitizeExternalUrl(rawLink);
+      if (!sanitized) {
+        setFormError('Por segurança, insira um link válido começando com https:// ou http://.');
+        return;
+      }
+      safeLink = sanitized;
+    }
+
     setIsSubmitting(true);
     try {
       const success = await onApplyJob(job, {
-        link: cvLink.trim() || undefined,
+        link: safeLink,
         fileName: cvFile?.name || undefined
       });
       if (success) {
@@ -111,12 +146,19 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
       }
     } catch (err) {
       console.error('Error submitting application:', err);
+      setFormError('Erro ao enviar candidatura. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleWhatsAppApply = async () => {
+  const handleWhatsAppApply = async (e: React.MouseEvent) => {
+    const rawLink = cvLink.trim();
+    if (rawLink && !sanitizeExternalUrl(rawLink)) {
+      e.preventDefault();
+      setFormError('Por segurança, corrija o link do currículo (deve iniciar com https:// ou http://).');
+      return;
+    }
     // Also save application into platform before opening WhatsApp
     handleConfirmApply();
   };
@@ -157,6 +199,13 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
           <p className="text-sm text-gray-600 leading-snug">
             Para se candidatar, anexe seu currículo em arquivo ou insira um link válido para seu perfil LinkedIn / Portfólio.
           </p>
+
+          {formError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2 text-rose-700 text-xs font-medium">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
+              <span>{formError}</span>
+            </div>
+          )}
 
           <div className="flex flex-col gap-4 mt-2">
             {/* Option 1: File Upload Block with Drag and Drop Support */}
@@ -222,7 +271,10 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
                 <input
                   type="url"
                   value={cvLink}
-                  onChange={(e) => setCvLink(e.target.value)}
+                  onChange={(e) => {
+                    setCvLink(e.target.value);
+                    if (formError) setFormError(null);
+                  }}
                   placeholder="https://linkedin.com/in/seu-perfil"
                   className="w-full outline-none bg-gray-50 border border-gray-200 rounded-[16px] py-3.5 pl-11 pr-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-[#4EA8C7] focus:ring-1 focus:ring-[#4EA8C7] transition-all"
                 />
