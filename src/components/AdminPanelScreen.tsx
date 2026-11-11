@@ -25,13 +25,16 @@ import {
 import { HIERARCHY_TIERS, HIERARCHY_LIST, resolveUserHierarchyTier, HierarchyTierKey } from '../lib/hierarchyRoles';
 import { AuditLogEntry, fetchAllAuditLogs, recordAuditLog } from '../lib/auditLogService';
 import { sanitizeExternalUrl } from '../lib/securityValidation';
+import { updateOwn2FASetting } from '../lib/twoFactorSettingsService';
+import { toast } from '../lib/toast';
 
 interface AdminPanelScreenProps {
   user: User;
   onLogout: () => void;
+  onUpdateUser?: (updatedUser: User) => void;
 }
 
-export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenProps) {
+export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: AdminPanelScreenProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'jobs' | 'company_jobs' | 'courses' | 'applications' | 'enrollments' | 'accounts' | 'audit_logs'>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
@@ -1228,11 +1231,37 @@ export default function AdminPanelScreen({ user, onLogout }: AdminPanelScreenPro
           </div>
         </div>
         
-        <div className="flex items-center gap-3 md:gap-4">
+        <div className="flex items-center gap-2.5 md:gap-4">
           <div className="hidden lg:flex flex-col text-right pr-4 border-r border-slate-800">
             <span className="text-xs font-bold text-slate-200">{user.name}</span>
             <span className="text-[10px] text-slate-400 font-mono">{user.email}</span>
           </div>
+
+          <button
+            type="button"
+            onClick={async () => {
+              const next = !Boolean(user.is2FAEnabled);
+              await updateOwn2FASetting(user, next, onUpdateUser);
+              toast.success(
+                next
+                  ? 'Verificação em Duas Etapas (2FA) ativada na sua conta Admin.'
+                  : 'Verificação em Duas Etapas (2FA) desativada na sua conta Admin.'
+              );
+            }}
+            title={
+              user.is2FAEnabled
+                ? '2FA Ativo na sua conta Admin (clique para desativar)'
+                : '2FA Desativado na sua conta Admin (clique para ativar)'
+            }
+            className={`flex items-center gap-1.5 px-2.5 md:px-3 py-2 md:py-2.5 rounded-lg md:rounded-xl border text-[10px] md:text-xs font-bold transition-all cursor-pointer active:scale-95 ${
+              user.is2FAEnabled
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">{user.is2FAEnabled ? '2FA Ativo' : '2FA Desativado'}</span>
+          </button>
           
           <button 
             onClick={onLogout}

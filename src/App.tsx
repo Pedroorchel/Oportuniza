@@ -48,6 +48,7 @@ import {
   clearSession2FAVerification,
   touchSession2FAActivity
 } from './lib/twoFactorSession';
+import { resolveStored2FAPref } from './lib/twoFactorSettingsService';
 import { sanitizeExternalUrl } from './lib/securityValidation';
 
 export default function App() {
@@ -57,6 +58,16 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin2FAVerified, setIsAdmin2FAVerified] = useState(false);
   const [isLogin2FAVerified, setIsLogin2FAVerified] = useState(false);
+  const handleWorkspaceUserUpdate = useCallback((updated: User | null) => {
+    setUser(updated);
+    if (updated && updated.is2FAEnabled === true) {
+      if (updated.isAdmin) {
+        setIsAdmin2FAVerified(true);
+      } else {
+        setIsLogin2FAVerified(true);
+      }
+    }
+  }, []);
   const [activePerk, setActivePerk] = useState<string | null>(null);
   const [jobsVersion, setJobsVersion] = useState(0);
   const [blockedNotice, setBlockedNotice] = useState<{ email: string; name?: string; reason?: string } | null>(null);
@@ -239,17 +250,20 @@ export default function App() {
         if (isUserAdmin && user) {
           e.preventDefault();
           const roleSig = buildSessionRoleSignature(user.role || 'Administrador', true);
-          const verified = isSession2FAVerified(user.id, user.email, {
-            isPrivileged: true,
-            expectedRoleSignature: roleSig
-          });
+          const requires2FAForAdmin = user.is2FAEnabled === true;
+          const verified =
+            !requires2FAForAdmin ||
+            isSession2FAVerified(user.id, user.email, {
+              isPrivileged: true,
+              expectedRoleSignature: roleSig
+            });
           setIsAdmin2FAVerified(verified);
           setUser(prev => (prev ? { ...prev, isAdmin: true } : prev));
           setCurrentScreen('admin');
           toast.info(
             verified
               ? 'Acessando painel de administração...'
-              : 'Verificação em duas etapas obrigatória para acessar o Painel Administrativo.'
+              : 'Confirme o código 2FA para acessar o Painel Administrativo.'
           );
         }
       }
@@ -442,9 +456,10 @@ export default function App() {
     };
   }, [user]);
 
-  // Security Watcher: Enforce 2FA inactivity timeout & max session age without disrupting normal navigation
+  // Security Watcher: Enforce 2FA inactivity timeout & max session age when 2FA is active for this account
   useEffect(() => {
     if (!user || (!user.isAdmin && user.status === 'pending')) return;
+    if (user.is2FAEnabled !== true) return;
     if (!isLogin2FAVerified && !isAdmin2FAVerified) return;
 
     const tier = resolveUserHierarchyTier(user);
@@ -645,27 +660,29 @@ export default function App() {
               const isAdminUser = Boolean(dbLoadedUser.isAdmin);
               const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
               const isPrivilegedLoaded = isAdminUser || loadedTier.id === 'support_service';
-              const verifiedForSession = isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email, {
-                isPrivileged: isPrivilegedLoaded,
-                expectedRoleSignature: buildSessionRoleSignature(dbLoadedUser.role, isAdminUser)
-              });
+              const requires2FAForLoaded = dbLoadedUser.is2FAEnabled === true;
+              const verifiedForSession =
+                !requires2FAForLoaded ||
+                isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email, {
+                  isPrivileged: isPrivilegedLoaded,
+                  expectedRoleSignature: buildSessionRoleSignature(dbLoadedUser.role, isAdminUser)
+                });
 
               if (isActivated && cleanEmail) {
                 try {
                   localStorage.setItem(`oportuniza-activated-${cleanEmail}`, 'true');
                 } catch {}
 
-                // Self-heal stale pending flags silently if DB row wasn't updated via RPC yet
+                // Self-heal stale pending status silently without ever overriding owner's is_2fa_enabled preference
                 if (
                   data &&
                   data.id &&
-                  (String(data.status || '').trim().toLowerCase() === 'pending' || data.is_2fa_enabled === false)
+                  String(data.status || '').trim().toLowerCase() === 'pending'
                 ) {
                   supabase
                     .from('users')
                     .update({
                       status: 'active',
-                      is_2fa_enabled: true,
                       account_type: dbLoadedUser.accountType || 'candidate',
                       updated_at: new Date().toISOString()
                     })
@@ -715,6 +732,14 @@ export default function App() {
               }
 
               const isAdminEmail = cleanEmail === 'oportunizahw@gmail.com';
+              const meta2FAPref = supabaseUser.user_metadata?.is_2fa_enabled;
+              const local2FAPref = resolveStored2FAPref(cleanEmail);
+              const initial2FAEnabled =
+                typeof meta2FAPref === 'boolean'
+                  ? meta2FAPref
+                  : typeof local2FAPref === 'boolean'
+                  ? local2FAPref
+                  : false;
               const isActivatedNew = Boolean(
                 isAdminEmail ||
                 isActivatedInMeta ||
@@ -735,7 +760,7 @@ export default function App() {
                     experience: isActivatedNew ? 'Nenhuma registrada' : '',
                     phone: '',
                     skills: [],
-                    is_2fa_enabled: isActivatedNew,
+                    is_2fa_enabled: initial2FAEnabled,
                     status: isActivatedNew ? 'active' : 'pending'
                   }, { onConflict: 'id' });
 
@@ -771,10 +796,13 @@ export default function App() {
                       });
                       const retryTier = resolveUserHierarchyTier(retryUser);
                       const retryPrivileged = Boolean(retryUser.isAdmin) || retryTier.id === 'support_service';
-                      const retryVerified = isSession2FAVerified(retryUser.id, retryUser.email, {
-                        isPrivileged: retryPrivileged,
-                        expectedRoleSignature: buildSessionRoleSignature(retryUser.role, Boolean(retryUser.isAdmin))
-                      });
+                      const retryRequires2FA = retryUser.is2FAEnabled === true;
+                      const retryVerified =
+                        !retryRequires2FA ||
+                        isSession2FAVerified(retryUser.id, retryUser.email, {
+                          isPrivileged: retryPrivileged,
+                          expectedRoleSignature: buildSessionRoleSignature(retryUser.role, Boolean(retryUser.isAdmin))
+                        });
                       setIsLogin2FAVerified(retryVerified);
                       setIsAdmin2FAVerified(retryUser.isAdmin ? retryVerified : false);
                       setUser(retryUser);
@@ -810,16 +838,19 @@ export default function App() {
               const resolvedInitialUser: User = {
                 ...initialUser,
                 isAdmin: isAdminEmail,
-                is2FAEnabled: true,
+                is2FAEnabled: initial2FAEnabled,
                 status: isActivatedNew ? 'active' : 'pending'
               };
-              const verifiedForSession = isSession2FAVerified(resolvedInitialUser.id, resolvedInitialUser.email, {
-                isPrivileged: isAdminEmail,
-                expectedRoleSignature: buildSessionRoleSignature(
-                  resolvedInitialUser.role || (isAdminEmail ? 'Administrador' : 'Candidato'),
-                  isAdminEmail
-                )
-              });
+              const requires2FANew = resolvedInitialUser.is2FAEnabled === true;
+              const verifiedForSession =
+                !requires2FANew ||
+                isSession2FAVerified(resolvedInitialUser.id, resolvedInitialUser.email, {
+                  isPrivileged: isAdminEmail,
+                  expectedRoleSignature: buildSessionRoleSignature(
+                    resolvedInitialUser.role || (isAdminEmail ? 'Administrador' : 'Candidato'),
+                    isAdminEmail
+                  )
+                });
               setIsLogin2FAVerified(verifiedForSession);
               setIsAdmin2FAVerified(isAdminEmail ? verifiedForSession : false);
               setUser(resolvedInitialUser);
@@ -1566,10 +1597,19 @@ export default function App() {
   );
   const isPendingVerification = Boolean(user && !isAdminSession && user.status === 'pending');
   const requiresAdmin2FA = Boolean(
-    user && !isPendingVerification && (isAdminSession || currentScreen === 'admin') && !isAdmin2FAVerified
+    user &&
+      !isPendingVerification &&
+      (isAdminSession || currentScreen === 'admin') &&
+      user.is2FAEnabled === true &&
+      !isAdmin2FAVerified
   );
   const requiresUser2FA = Boolean(
-    user && !isPendingVerification && !isAdminSession && currentScreen !== 'admin' && !isLogin2FAVerified
+    user &&
+      !isPendingVerification &&
+      !isAdminSession &&
+      currentScreen !== 'admin' &&
+      user.is2FAEnabled === true &&
+      !isLogin2FAVerified
   );
   const isWorkspaceUnlocked = Boolean(
     user && !isPendingVerification && !requiresAdmin2FA && !requiresUser2FA
@@ -1636,14 +1676,17 @@ export default function App() {
                 const nextUser: User = {
                   ...loggedInUser,
                   status: loggedInUser.status === 'pending' ? 'pending' : 'active',
-                  is2FAEnabled: true
+                  is2FAEnabled: Boolean(loggedInUser.is2FAEnabled)
                 };
                 const tier = resolveUserHierarchyTier(nextUser);
                 const isPrivilegedSession = Boolean(nextUser.isAdmin) || tier.id === 'support_service';
-                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email, {
-                  isPrivileged: isPrivilegedSession,
-                  expectedRoleSignature: buildSessionRoleSignature(nextUser.role, Boolean(nextUser.isAdmin))
-                });
+                const requires2FA = nextUser.is2FAEnabled === true;
+                const verifiedNow =
+                  !requires2FA ||
+                  isSession2FAVerified(nextUser.id, nextUser.email, {
+                    isPrivileged: isPrivilegedSession,
+                    expectedRoleSignature: buildSessionRoleSignature(nextUser.role, Boolean(nextUser.isAdmin))
+                  });
                 setIsLogin2FAVerified(verifiedNow);
                 setIsAdmin2FAVerified(nextUser.isAdmin ? verifiedNow : false);
                 setUser(nextUser);
@@ -1659,19 +1702,26 @@ export default function App() {
                 }
               }}
               onAdminLoginSuccess={(adminUser) => {
-                const verifiedNow = isSession2FAVerified(adminUser.id, adminUser.email, {
-                  isPrivileged: true,
-                  expectedRoleSignature: buildSessionRoleSignature(adminUser.role || 'Administrador', true)
-                });
-                setIsLogin2FAVerified(false);
+                const nextAdminUser: User = {
+                  ...adminUser,
+                  is2FAEnabled: Boolean(adminUser.is2FAEnabled)
+                };
+                const requires2FA = nextAdminUser.is2FAEnabled === true;
+                const verifiedNow =
+                  !requires2FA ||
+                  isSession2FAVerified(nextAdminUser.id, nextAdminUser.email, {
+                    isPrivileged: true,
+                    expectedRoleSignature: buildSessionRoleSignature(nextAdminUser.role || 'Administrador', true)
+                  });
+                setIsLogin2FAVerified(verifiedNow);
                 setIsAdmin2FAVerified(verifiedNow);
-                setUser(adminUser);
+                setUser(nextAdminUser);
                 setCurrentScreen('admin');
               }}
             />
           )}
 
-          {/* Mandatory 2FA Activation + Profile Completion for new Google/OAuth or pending accounts */}
+          {/* Onboarding Activation + Profile Completion for new Google/OAuth or pending accounts */}
           {user && isPendingVerification && !isPublicScreen && (
             <AuthScreen 
               enforceVerificationUser={user}
@@ -1684,13 +1734,20 @@ export default function App() {
               }}
               onSignOut={handleSignOut}
               onLoginSuccess={(loggedInUser) => {
-                const nextUser: User = { ...loggedInUser, status: 'active', is2FAEnabled: true };
+                const nextUser: User = {
+                  ...loggedInUser,
+                  status: 'active',
+                  is2FAEnabled: Boolean(loggedInUser.is2FAEnabled)
+                };
                 const tier = resolveUserHierarchyTier(nextUser);
                 const isPrivilegedSession = Boolean(nextUser.isAdmin) || tier.id === 'support_service';
-                const verifiedNow = isSession2FAVerified(nextUser.id, nextUser.email, {
-                  isPrivileged: isPrivilegedSession,
-                  expectedRoleSignature: buildSessionRoleSignature(nextUser.role, Boolean(nextUser.isAdmin))
-                });
+                const requires2FA = nextUser.is2FAEnabled === true;
+                const verifiedNow =
+                  !requires2FA ||
+                  isSession2FAVerified(nextUser.id, nextUser.email, {
+                    isPrivileged: isPrivilegedSession,
+                    expectedRoleSignature: buildSessionRoleSignature(nextUser.role, Boolean(nextUser.isAdmin))
+                  });
                 setIsLogin2FAVerified(verifiedNow);
                 setIsAdmin2FAVerified(nextUser.isAdmin ? verifiedNow : false);
                 setUser(nextUser);
@@ -1706,7 +1763,7 @@ export default function App() {
             />
           )}
 
-          {/* Mandatory Universal 2FA Gate for ALL Non-Admin Active Users (Candidate, Company, Atendimento, E-mail, Google, GitHub) */}
+          {/* Optional 2FA Gate for Active Non-Admin Users when account owner left 2FA enabled */}
           {user && requiresUser2FA && !isPublicScreen && (
             <ErrorBoundary fallbackTitle="Erro ao carregar a Verificação em Duas Etapas">
               <TwoFactorAuthScreen
@@ -1717,10 +1774,10 @@ export default function App() {
             </ErrorBoundary>
           )}
 
-          {/* Admin Panel (Guarded by Mandatory 2FA) */}
+          {/* Admin Panel (Guarded by 2FA when enabled by account owner) */}
           {user && !isPendingVerification && (isAdminSession || currentScreen === 'admin') && !isPublicScreen && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel Administrativo">
-              {!isAdmin2FAVerified ? (
+              {requiresAdmin2FA ? (
                 <Admin2FAScreen
                   user={user}
                   onVerified={() => setIsAdmin2FAVerified(true)}
@@ -1730,18 +1787,19 @@ export default function App() {
                 <AdminPanelScreen 
                   user={user}
                   onLogout={handleSignOut}
+                  onUpdateUser={handleWorkspaceUserUpdate}
                 />
               )}
             </ErrorBoundary>
           )}
 
-          {/* Company Dashboard (Exclusive Company / RH Workspace - Protected by Mandatory 2FA) */}
+          {/* Company Dashboard (Exclusive Company / RH Workspace) */}
           {isWorkspaceUnlocked && !isAdminSession && !isPublicScreen && currentScreen !== 'admin' && isCompanyAccount && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel da Empresa">
               <CompanyDashboardScreen
                 user={user}
                 onLogout={handleSignOut}
-                onUpdateUser={(updated) => setUser(updated)}
+                onUpdateUser={handleWorkspaceUserUpdate}
               />
             </ErrorBoundary>
           )}
@@ -2497,7 +2555,7 @@ export default function App() {
           {currentScreen === 'profile' && (
             <ProfileAndSettings
               user={user}
-              onSetUser={setUser}
+              onSetUser={handleWorkspaceUserUpdate}
               onNavigate={handleScreenNavigation}
               tabType={settingsTabType === 'cv' ? 'cv' : 'profile'}
               setTabType={setSettingsTabType}
@@ -2521,7 +2579,7 @@ export default function App() {
           {currentScreen === 'settings' && (
             <SettingsScreen
               user={user}
-              onSetUser={setUser}
+              onSetUser={handleWorkspaceUserUpdate}
               onNavigate={handleScreenNavigation}
               favorites={favorites}
               applications={applications}
@@ -2543,6 +2601,7 @@ export default function App() {
                 user={user}
                 onLogout={handleSignOut}
                 onNavigateHome={() => handleScreenNavigation('home')}
+                onUpdateUser={handleWorkspaceUserUpdate}
               />
             )}
 

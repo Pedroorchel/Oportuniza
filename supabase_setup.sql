@@ -394,6 +394,8 @@ BEGIN
         'check_email_status',
         'block_user_by_email',
         'unblock_user_by_email',
+        'relink_user_id_references',
+        'assign_company_user_id',
         'get_my_profile_bundle',
         'complete_my_profile_activation'
       )
@@ -401,6 +403,111 @@ BEGIN
     EXECUTE 'DROP FUNCTION IF EXISTS ' || fn.sig::text || ';';
   END LOOP;
 END $$;
+
+-- Remove FKs legadas em colunas user_id que impediriam re-sincronizar UUIDs entre auth.users e public.users
+DO $$
+DECLARE
+  fk RECORD;
+BEGIN
+  FOR fk IN
+    SELECT DISTINCT
+      cls.relname AS tbl_name,
+      con.conname AS con_name
+    FROM pg_constraint con
+    JOIN pg_class cls ON cls.oid = con.conrelid
+    JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace
+    JOIN pg_attribute att ON att.attrelid = cls.oid AND att.attnum = ANY(con.conkey)
+    WHERE nsp.nspname = 'public'
+      AND con.contype = 'f'
+      AND cls.relname IN ('applications', 'enrollments', 'user_course_progress', 'companies', 'support_tickets')
+      AND att.attname = 'user_id'
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT IF EXISTS %I;', fk.tbl_name, fk.con_name);
+  END LOOP;
+END $$;
+
+-- Auxiliar interno seguro para re-vincular user_id independentemente de a coluna ser UUID ou TEXT no banco
+CREATE OR REPLACE FUNCTION public.relink_user_id_references(p_old_uid TEXT, p_new_uid TEXT)
+RETURNS VOID AS $$
+DECLARE
+  v_old TEXT := TRIM(COALESCE(p_old_uid, ''));
+  v_new TEXT := TRIM(COALESCE(p_new_uid, ''));
+  v_is_new_uuid BOOLEAN;
+  v_tbl TEXT;
+  v_udt TEXT;
+BEGIN
+  IF v_old = '' OR v_new = '' OR v_old = v_new THEN
+    RETURN;
+  END IF;
+
+  v_is_new_uuid := (v_new ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
+  FOREACH v_tbl IN ARRAY ARRAY['applications', 'enrollments', 'user_course_progress', 'companies', 'support_tickets']
+  LOOP
+    SELECT c.udt_name INTO v_udt
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = v_tbl
+      AND c.column_name = 'user_id'
+    LIMIT 1;
+
+    IF v_udt IS NULL THEN
+      CONTINUE;
+    ELSIF v_udt = 'uuid' THEN
+      IF v_is_new_uuid THEN
+        EXECUTE format(
+          'UPDATE public.%I SET user_id = $1::uuid WHERE user_id::text = $2 AND COALESCE(user_id::text, '''') <> $1',
+          v_tbl
+        ) USING v_new, v_old;
+      END IF;
+    ELSE
+      EXECUTE format(
+        'UPDATE public.%I SET user_id = $1 WHERE user_id::text = $2 AND COALESCE(user_id::text, '''') <> $1',
+        v_tbl
+      ) USING v_new, v_old;
+    END IF;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.relink_user_id_references(TEXT, TEXT) FROM PUBLIC;
+
+-- Auxiliar interno seguro para atualizar companies.user_id respeitando tipagem UUID ou TEXT
+CREATE OR REPLACE FUNCTION public.assign_company_user_id(p_company_id TEXT, p_new_uid TEXT)
+RETURNS VOID AS $$
+DECLARE
+  v_cid TEXT := TRIM(COALESCE(p_company_id, ''));
+  v_uid TEXT := TRIM(COALESCE(p_new_uid, ''));
+  v_is_uid_uuid BOOLEAN;
+  v_udt TEXT;
+BEGIN
+  IF v_cid = '' OR v_uid = '' THEN
+    RETURN;
+  END IF;
+
+  SELECT c.udt_name INTO v_udt
+  FROM information_schema.columns c
+  WHERE c.table_schema = 'public'
+    AND c.table_name = 'companies'
+    AND c.column_name = 'user_id'
+  LIMIT 1;
+
+  IF v_udt IS NULL THEN
+    RETURN;
+  ELSIF v_udt = 'uuid' THEN
+    v_is_uid_uuid := (v_uid ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+    IF v_is_uid_uuid THEN
+      EXECUTE 'UPDATE public.companies SET user_id = $1::uuid WHERE id::text = $2 AND COALESCE(user_id::text, '''') <> $1'
+      USING v_uid, v_cid;
+    END IF;
+  ELSE
+    EXECUTE 'UPDATE public.companies SET user_id = $1 WHERE id::text = $2 AND COALESCE(user_id::text, '''') <> $1'
+    USING v_uid, v_cid;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.assign_company_user_id(TEXT, TEXT) FROM PUBLIC;
 
 -- RPC segura para verificar se e-mail já existe ou está bloqueado SEM expor linhas ou PII (LGPD)
 DROP FUNCTION IF EXISTS public.check_email_status(TEXT);
@@ -740,7 +847,7 @@ BEGIN
 
   IF v_is_self_activating THEN
     NEW.status := 'active';
-    NEW.is_2fa_enabled := TRUE;
+    NEW.is_2fa_enabled := COALESCE(NEW.is_2fa_enabled, OLD.is_2fa_enabled, FALSE);
     IF LOWER(COALESCE(OLD.role, '')) ~ '(atendimento|suporte|moderador)'
        OR LOWER(COALESCE(OLD.cargo, '')) ~ '(atendimento|suporte|moderador)' THEN
       NEW.account_type := COALESCE(NULLIF(OLD.account_type, ''), 'candidate');
@@ -859,41 +966,13 @@ BEGIN
           (v_clean_email <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = v_clean_email)
         )
     LOOP
-      IF to_regclass('public.applications') IS NOT NULL THEN
-        UPDATE public.applications SET user_id = new.id::text WHERE user_id::text = v_dup_row.id::text;
-      END IF;
-      IF to_regclass('public.enrollments') IS NOT NULL THEN
-        UPDATE public.enrollments SET user_id = new.id::text WHERE user_id::text = v_dup_row.id::text;
-      END IF;
-      IF to_regclass('public.user_course_progress') IS NOT NULL THEN
-        UPDATE public.user_course_progress SET user_id = new.id::text WHERE user_id::text = v_dup_row.id::text;
-      END IF;
-      IF to_regclass('public.companies') IS NOT NULL THEN
-        UPDATE public.companies SET user_id = new.id::text WHERE user_id::text = v_dup_row.id::text;
-      END IF;
-      IF to_regclass('public.support_tickets') IS NOT NULL THEN
-        UPDATE public.support_tickets SET user_id = new.id::text WHERE user_id::text = v_dup_row.id::text;
-      END IF;
+      PERFORM public.relink_user_id_references(v_dup_row.id::text, new.id::text);
       DELETE FROM public.users WHERE id = v_dup_row.id;
     END LOOP;
 
     -- Re-vincula registros filhos caso o ID anterior da conta principal seja diferente do novo auth.users.id
     IF v_existing.id::text <> new.id::text THEN
-      IF to_regclass('public.applications') IS NOT NULL THEN
-        UPDATE public.applications SET user_id = new.id::text WHERE user_id::text = v_existing.id::text;
-      END IF;
-      IF to_regclass('public.enrollments') IS NOT NULL THEN
-        UPDATE public.enrollments SET user_id = new.id::text WHERE user_id::text = v_existing.id::text;
-      END IF;
-      IF to_regclass('public.user_course_progress') IS NOT NULL THEN
-        UPDATE public.user_course_progress SET user_id = new.id::text WHERE user_id::text = v_existing.id::text;
-      END IF;
-      IF to_regclass('public.companies') IS NOT NULL THEN
-        UPDATE public.companies SET user_id = new.id::text WHERE user_id::text = v_existing.id::text;
-      END IF;
-      IF to_regclass('public.support_tickets') IS NOT NULL THEN
-        UPDATE public.support_tickets SET user_id = new.id::text WHERE user_id::text = v_existing.id::text;
-      END IF;
+      PERFORM public.relink_user_id_references(v_existing.id::text, new.id::text);
     END IF;
 
     -- Preserva integralmente os dados, status, bloqueios e cargos da conta existente!
@@ -922,16 +1001,19 @@ BEGIN
           OR COALESCE(is_2fa_enabled, FALSE) = TRUE THEN 'active'
         ELSE COALESCE(NULLIF(status, ''), 'pending')
       END,
-      is_2fa_enabled = CASE
-        WHEN v_is_master OR v_company_found THEN TRUE
-        WHEN LOWER(COALESCE(status, '')) = 'active' THEN TRUE
-        ELSE COALESCE(is_2fa_enabled, FALSE)
-      END,
+      is_2fa_enabled = COALESCE(
+        is_2fa_enabled,
+        CASE
+          WHEN NULLIF(TRIM(COALESCE(new.raw_user_meta_data->>'is_2fa_enabled', '')), '') IS NOT NULL
+            THEN LOWER(TRIM(new.raw_user_meta_data->>'is_2fa_enabled')) IN ('true', '1', 'yes', 'on')
+          ELSE FALSE
+        END
+      ),
       updated_at = timezone('utc'::text, now())
     WHERE id = v_existing.id;
 
     IF v_company_found AND COALESCE(v_company.user_id::text, '') <> new.id::text THEN
-      UPDATE public.companies SET user_id = new.id::text WHERE id = v_company.id;
+      PERFORM public.assign_company_user_id(v_company.id::text, new.id::text);
     END IF;
 
     RETURN new;
@@ -960,7 +1042,11 @@ BEGIN
     WHEN v_requires_act THEN 'pending'
     ELSE 'active'
   END;
-  v_is_2fa := (NOT v_requires_act OR v_is_master OR v_company_found);
+  v_is_2fa := CASE
+    WHEN NULLIF(TRIM(COALESCE(new.raw_user_meta_data->>'is_2fa_enabled', '')), '') IS NOT NULL
+      THEN LOWER(TRIM(new.raw_user_meta_data->>'is_2fa_enabled')) IN ('true', '1', 'yes', 'on')
+    ELSE FALSE
+  END;
 
   INSERT INTO public.users (
     id, email, name, avatar_url, phone, bio, education, experience,
@@ -998,7 +1084,7 @@ BEGIN
     updated_at = timezone('utc'::text, now());
 
   IF v_company_found THEN
-    UPDATE public.companies SET user_id = new.id::text WHERE id = v_company.id;
+    PERFORM public.assign_company_user_id(v_company.id::text, new.id::text);
   END IF;
 
   RETURN new;
@@ -1720,6 +1806,8 @@ DECLARE
   v_comp_grp RECORD;
   v_comp_loser RECORD;
   v_comp_winner public.companies%ROWTYPE;
+  v_best_company_uid TEXT;
+  v_comp_sync RECORD;
   v_auth RECORD;
   v_existing public.users%ROWTYPE;
 BEGIN
@@ -1760,11 +1848,7 @@ BEGIN
       WHERE LOWER(TRIM(COALESCE(u.email, ''))) = v_grp.clean_email
         AND u.id <> v_winner.id
     LOOP
-      UPDATE public.applications SET user_id = v_winner.id::text WHERE user_id::text = v_loser.id::text;
-      UPDATE public.enrollments SET user_id = v_winner.id::text WHERE user_id::text = v_loser.id::text;
-      UPDATE public.user_course_progress SET user_id = v_winner.id::text WHERE user_id::text = v_loser.id::text;
-      UPDATE public.companies SET user_id = v_winner.id::text WHERE user_id::text = v_loser.id::text;
-      UPDATE public.support_tickets SET user_id = v_winner.id::text WHERE user_id::text = v_loser.id::text;
+      PERFORM public.relink_user_id_references(v_loser.id::text, v_winner.id::text);
 
       UPDATE public.users
       SET
@@ -1785,7 +1869,7 @@ BEGIN
         skills = CASE WHEN COALESCE(array_length(skills, 1), 0) > 0 THEN skills ELSE COALESCE(v_loser.skills, '{}') END,
         favorites = CASE WHEN COALESCE(array_length(favorites, 1), 0) > 0 THEN favorites ELSE COALESCE(v_loser.favorites, '{}') END,
         is_admin = (COALESCE(is_admin, FALSE) OR COALESCE(v_loser.is_admin, FALSE)),
-        is_2fa_enabled = (COALESCE(is_2fa_enabled, FALSE) OR COALESCE(v_loser.is_2fa_enabled, FALSE)),
+        is_2fa_enabled = COALESCE(is_2fa_enabled, v_loser.is_2fa_enabled, FALSE),
         status = CASE
           WHEN COALESCE(is_blocked, FALSE) OR LOWER(COALESCE(status, '')) IN ('blocked', 'bloqueado') THEN status
           WHEN LOWER(COALESCE(status, '')) = 'active' OR LOWER(COALESCE(v_loser.status, '')) = 'active' THEN 'active'
@@ -1827,9 +1911,13 @@ BEGIN
       WHERE LOWER(TRIM(COALESCE(c.email, ''))) = v_comp_grp.clean_email
         AND c.id <> v_comp_winner.id
     LOOP
+      v_best_company_uid := COALESCE(
+        NULLIF(TRIM(COALESCE(v_comp_winner.user_id::text, '')), ''),
+        NULLIF(TRIM(COALESCE(v_comp_loser.user_id::text, '')), '')
+      );
+
       UPDATE public.companies
       SET
-        user_id = COALESCE(NULLIF(TRIM(COALESCE(user_id, '')), ''), NULLIF(TRIM(COALESCE(v_comp_loser.user_id, '')), '')),
         cnpj = COALESCE(NULLIF(TRIM(COALESCE(cnpj, '')), ''), NULLIF(TRIM(COALESCE(v_comp_loser.cnpj, '')), '')),
         phone = COALESCE(NULLIF(TRIM(COALESCE(phone, '')), ''), NULLIF(TRIM(COALESCE(v_comp_loser.phone, '')), '')),
         address = COALESCE(NULLIF(TRIM(COALESCE(address, '')), ''), NULLIF(TRIM(COALESCE(v_comp_loser.address, '')), '')),
@@ -1837,6 +1925,11 @@ BEGIN
         logo_url = COALESCE(NULLIF(TRIM(COALESCE(logo_url, '')), ''), NULLIF(TRIM(COALESCE(v_comp_loser.logo_url, '')), '')),
         verified = (COALESCE(verified, FALSE) OR COALESCE(v_comp_loser.verified, FALSE))
       WHERE id = v_comp_winner.id;
+
+      IF v_best_company_uid IS NOT NULL AND COALESCE(v_comp_winner.user_id::text, '') <> v_best_company_uid THEN
+        PERFORM public.assign_company_user_id(v_comp_winner.id::text, v_best_company_uid);
+        SELECT * INTO v_comp_winner FROM public.companies WHERE id = v_comp_winner.id LIMIT 1;
+      END IF;
 
       DELETE FROM public.companies WHERE id = v_comp_loser.id;
     END LOOP;
@@ -1860,31 +1953,33 @@ BEGIN
     WHERE LOWER(TRIM(COALESCE(u.email, ''))) = v_auth.clean_email
     LIMIT 1;
 
-    IF FOUND AND v_existing.id <> v_auth.auth_id AND NOT EXISTS (SELECT 1 FROM public.users u2 WHERE u2.id = v_auth.auth_id) THEN
-      UPDATE public.applications SET user_id = v_auth.auth_id::text WHERE user_id::text = v_existing.id::text;
-      UPDATE public.enrollments SET user_id = v_auth.auth_id::text WHERE user_id::text = v_existing.id::text;
-      UPDATE public.user_course_progress SET user_id = v_auth.auth_id::text WHERE user_id::text = v_existing.id::text;
-      UPDATE public.companies SET user_id = v_auth.auth_id::text WHERE user_id::text = v_existing.id::text;
-      UPDATE public.support_tickets SET user_id = v_auth.auth_id::text WHERE user_id::text = v_existing.id::text;
+    IF FOUND AND v_existing.id::text <> v_auth.auth_id::text AND NOT EXISTS (SELECT 1 FROM public.users u2 WHERE u2.id::text = v_auth.auth_id::text) THEN
+      PERFORM public.relink_user_id_references(v_existing.id::text, v_auth.auth_id::text);
       UPDATE public.users SET id = v_auth.auth_id WHERE id = v_existing.id;
     END IF;
   END LOOP;
 
-  -- Sincroniza user_id na tabela companies
-  UPDATE public.companies c
-  SET user_id = u.id::text
-  FROM public.users u
-  WHERE LOWER(TRIM(COALESCE(c.email, ''))) = LOWER(TRIM(COALESCE(u.email, '')))
-    AND COALESCE(c.user_id::text, '') <> u.id::text;
+  -- Sincroniza user_id na tabela companies respeitando tipagem UUID ou TEXT
+  FOR v_comp_sync IN
+    SELECT DISTINCT ON (c.id)
+      c.id::text AS company_id,
+      u.id::text AS target_uid
+    FROM public.companies c
+    JOIN public.users u
+      ON LOWER(TRIM(COALESCE(c.email, ''))) = LOWER(TRIM(COALESCE(u.email, '')))
+    WHERE COALESCE(c.user_id::text, '') <> u.id::text
+    ORDER BY c.id, u.updated_at DESC NULLS LAST
+  LOOP
+    PERFORM public.assign_company_user_id(v_comp_sync.company_id, v_comp_sync.target_uid);
+  END LOOP;
 
-  -- 14.4 Garante status 'active' e is_2fa_enabled = TRUE para contas existentes já preenchidas/ativas (não bloqueadas)
+  -- 14.4 Garante status 'active' para contas existentes já preenchidas/ativas (preserva a escolha de 2FA do titular)
   UPDATE public.users u
   SET
     status = 'active',
-    is_2fa_enabled = TRUE,
     updated_at = timezone('utc'::text, now())
   WHERE COALESCE(u.is_blocked, FALSE) = FALSE
-    AND LOWER(COALESCE(u.status, '')) NOT IN ('blocked', 'bloqueado')
+    AND LOWER(COALESCE(u.status, '')) NOT IN ('blocked', 'bloqueado', 'active')
     AND (
       COALESCE(u.is_admin, FALSE) = TRUE OR
       LOWER(TRIM(COALESCE(u.email, ''))) = 'oportunizahw@gmail.com' OR
@@ -1978,11 +2073,7 @@ BEGIN
           (v_email <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = v_email)
         )
     LOOP
-      UPDATE public.applications SET user_id = COALESCE(NULLIF(v_uid, ''), v_winner.id::text) WHERE user_id::text = v_dup.id::text;
-      UPDATE public.enrollments SET user_id = COALESCE(NULLIF(v_uid, ''), v_winner.id::text) WHERE user_id::text = v_dup.id::text;
-      UPDATE public.user_course_progress SET user_id = COALESCE(NULLIF(v_uid, ''), v_winner.id::text) WHERE user_id::text = v_dup.id::text;
-      UPDATE public.companies SET user_id = COALESCE(NULLIF(v_uid, ''), v_winner.id::text) WHERE user_id::text = v_dup.id::text;
-      UPDATE public.support_tickets SET user_id = COALESCE(NULLIF(v_uid, ''), v_winner.id::text) WHERE user_id::text = v_dup.id::text;
+      PERFORM public.relink_user_id_references(v_dup.id::text, COALESCE(NULLIF(v_uid, ''), v_winner.id::text));
 
       UPDATE public.users
       SET
@@ -2003,7 +2094,7 @@ BEGIN
         skills = CASE WHEN COALESCE(array_length(skills, 1), 0) > 0 THEN skills ELSE COALESCE(v_dup.skills, '{}') END,
         favorites = CASE WHEN COALESCE(array_length(favorites, 1), 0) > 0 THEN favorites ELSE COALESCE(v_dup.favorites, '{}') END,
         is_admin = (COALESCE(is_admin, FALSE) OR COALESCE(v_dup.is_admin, FALSE)),
-        is_2fa_enabled = (COALESCE(is_2fa_enabled, FALSE) OR COALESCE(v_dup.is_2fa_enabled, FALSE)),
+        is_2fa_enabled = COALESCE(is_2fa_enabled, v_dup.is_2fa_enabled, FALSE),
         updated_at = timezone('utc'::text, now())
       WHERE id = v_winner.id;
 
@@ -2011,11 +2102,7 @@ BEGIN
     END LOOP;
 
     IF v_auth_uid IS NOT NULL AND v_winner.id::text <> v_uid THEN
-      UPDATE public.applications SET user_id = v_uid WHERE user_id::text = v_winner.id::text;
-      UPDATE public.enrollments SET user_id = v_uid WHERE user_id::text = v_winner.id::text;
-      UPDATE public.user_course_progress SET user_id = v_uid WHERE user_id::text = v_winner.id::text;
-      UPDATE public.companies SET user_id = v_uid WHERE user_id::text = v_winner.id::text;
-      UPDATE public.support_tickets SET user_id = v_uid WHERE user_id::text = v_winner.id::text;
+      PERFORM public.relink_user_id_references(v_winner.id::text, v_uid);
 
       UPDATE public.users
       SET id = v_auth_uid, email = COALESCE(NULLIF(v_email, ''), email)
@@ -2037,8 +2124,8 @@ BEGIN
   v_company_found := FOUND;
 
   IF v_company_found AND v_uid <> '' AND COALESCE(v_company.user_id::text, '') <> v_uid THEN
-    UPDATE public.companies SET user_id = v_uid WHERE id = v_company.id;
-    v_company.user_id := v_uid;
+    PERFORM public.assign_company_user_id(v_company.id::text, v_uid);
+    SELECT * INTO v_company FROM public.companies WHERE id = v_company.id LIMIT 1;
   END IF;
 
   IF v_winner_found THEN
@@ -2073,11 +2160,10 @@ BEGIN
       COALESCE(array_length(v_winner.skills, 1), 0) > 0
     );
 
-    IF v_has_populated AND (LOWER(COALESCE(v_winner.status, '')) <> 'active' OR COALESCE(v_winner.is_2fa_enabled, FALSE) = FALSE) THEN
+    IF v_has_populated AND LOWER(COALESCE(v_winner.status, '')) <> 'active' THEN
       UPDATE public.users
       SET
         status = 'active',
-        is_2fa_enabled = TRUE,
         email = COALESCE(NULLIF(v_email, ''), email),
         updated_at = timezone('utc'::text, now())
       WHERE id = v_winner.id
@@ -2124,6 +2210,7 @@ DECLARE
   v_resp_name TEXT;
   v_segment TEXT;
   v_neighborhood TEXT;
+  v_requested_2fa BOOLEAN;
 BEGIN
   v_auth_uid := auth.uid();
   v_uid := COALESCE(v_auth_uid::text, '');
@@ -2174,6 +2261,11 @@ BEGIN
   v_resp_name := NULLIF(TRIM(COALESCE(payload->>'responsible_name', '')), '');
   v_segment := NULLIF(TRIM(COALESCE(payload->>'company_segment', '')), '');
   v_neighborhood := NULLIF(TRIM(COALESCE(payload->>'company_neighborhood', '')), '');
+  v_requested_2fa := CASE
+    WHEN NULLIF(TRIM(COALESCE(payload->>'is_2fa_enabled', '')), '') IS NOT NULL
+      THEN LOWER(TRIM(payload->>'is_2fa_enabled')) IN ('true', '1', 'yes', 'on')
+    ELSE NULL
+  END;
 
   IF v_existing_found THEN
     -- Re-vincula e remove quaisquer linhas duplicadas que compartilhem o UID autenticado ou o e-mail normalizado
@@ -2186,20 +2278,12 @@ BEGIN
           LOWER(TRIM(COALESCE(u.email, ''))) = v_email
         )
     LOOP
-      UPDATE public.applications SET user_id = v_uid WHERE user_id::text = v_dup_row.id::text;
-      UPDATE public.enrollments SET user_id = v_uid WHERE user_id::text = v_dup_row.id::text;
-      UPDATE public.user_course_progress SET user_id = v_uid WHERE user_id::text = v_dup_row.id::text;
-      UPDATE public.companies SET user_id = v_uid WHERE user_id::text = v_dup_row.id::text;
-      UPDATE public.support_tickets SET user_id = v_uid WHERE user_id::text = v_dup_row.id::text;
+      PERFORM public.relink_user_id_references(v_dup_row.id::text, v_uid);
       DELETE FROM public.users WHERE id = v_dup_row.id;
     END LOOP;
 
     IF v_existing.id <> v_auth_uid THEN
-      UPDATE public.applications SET user_id = v_uid WHERE user_id::text = v_existing.id::text;
-      UPDATE public.enrollments SET user_id = v_uid WHERE user_id::text = v_existing.id::text;
-      UPDATE public.user_course_progress SET user_id = v_uid WHERE user_id::text = v_existing.id::text;
-      UPDATE public.companies SET user_id = v_uid WHERE user_id::text = v_existing.id::text;
-      UPDATE public.support_tickets SET user_id = v_uid WHERE user_id::text = v_existing.id::text;
+      PERFORM public.relink_user_id_references(v_existing.id::text, v_uid);
     END IF;
 
     UPDATE public.users
@@ -2241,7 +2325,7 @@ BEGIN
       company_segment = COALESCE(v_segment, company_segment),
       company_neighborhood = COALESCE(v_neighborhood, company_neighborhood),
       is_admin = (v_is_master OR COALESCE(is_admin, FALSE)),
-      is_2fa_enabled = TRUE,
+      is_2fa_enabled = COALESCE(v_requested_2fa, is_2fa_enabled, FALSE),
       status = 'active',
       updated_at = timezone('utc'::text, now())
     WHERE id = v_existing.id
@@ -2270,7 +2354,7 @@ BEGIN
       v_segment,
       v_neighborhood,
       v_is_master,
-      TRUE,
+      COALESCE(v_requested_2fa, FALSE),
       'active'
     )
     RETURNING * INTO v_saved;
@@ -2282,6 +2366,89 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 REVOKE ALL ON FUNCTION public.complete_my_profile_activation(JSONB) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.complete_my_profile_activation(JSONB) TO authenticated;
+
+-- RPC exclusiva para o titular da conta ativar ou desativar seu próprio 2FA
+DROP FUNCTION IF EXISTS public.set_my_2fa_enabled(BOOLEAN);
+CREATE OR REPLACE FUNCTION public.set_my_2fa_enabled(p_enabled BOOLEAN)
+RETURNS JSONB AS $$
+DECLARE
+  v_auth_uid UUID;
+  v_uid TEXT;
+  v_email TEXT;
+  v_updated public.users%ROWTYPE;
+  v_is_blocked BOOLEAN := FALSE;
+  v_desired BOOLEAN := COALESCE(p_enabled, FALSE);
+BEGIN
+  v_auth_uid := auth.uid();
+  v_uid := COALESCE(v_auth_uid::text, '');
+  v_email := public.current_auth_email();
+
+  IF v_uid = '' AND v_email = '' THEN
+    RAISE EXCEPTION 'Sessão autenticada necessária para alterar a configuração de 2FA.';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.users u
+    WHERE (
+      (v_uid <> '' AND u.id::text = v_uid) OR
+      (v_email <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = v_email)
+    )
+    AND (
+      COALESCE(u.is_blocked, FALSE) = TRUE OR
+      LOWER(COALESCE(u.status, '')) IN ('blocked', 'bloqueado')
+    )
+  ) INTO v_is_blocked;
+
+  IF v_is_blocked THEN
+    RAISE EXCEPTION 'Conta bloqueada não pode alterar preferências de segurança.';
+  END IF;
+
+  PERFORM set_config('oportuniza.bypass_guard', 'on', TRUE);
+
+  UPDATE public.users u
+  SET
+    is_2fa_enabled = v_desired,
+    updated_at = timezone('utc'::text, now())
+  WHERE (v_uid <> '' AND u.id::text = v_uid)
+     OR (v_email <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = v_email);
+
+  SELECT * INTO v_updated
+  FROM public.users u
+  WHERE (v_uid <> '' AND u.id::text = v_uid)
+     OR (v_email <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = v_email)
+  ORDER BY
+    (CASE WHEN v_uid <> '' AND u.id::text = v_uid THEN 0 ELSE 1 END),
+    u.updated_at DESC NULLS LAST
+  LIMIT 1;
+
+  IF NOT FOUND AND v_auth_uid IS NOT NULL AND v_email <> '' THEN
+    INSERT INTO public.users (
+      id, email, name, is_admin, is_2fa_enabled, account_type, role, cargo, status
+    )
+    VALUES (
+      v_auth_uid,
+      v_email,
+      split_part(v_email, '@', 1),
+      (v_email = 'oportunizahw@gmail.com'),
+      v_desired,
+      'candidate',
+      CASE WHEN v_email = 'oportunizahw@gmail.com' THEN 'Administrador' ELSE 'Candidato' END,
+      CASE WHEN v_email = 'oportunizahw@gmail.com' THEN 'Administrador' ELSE 'Estudante' END,
+      'active'
+    )
+    RETURNING * INTO v_updated;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', TRUE,
+    'is_2fa_enabled', COALESCE(v_updated.is_2fa_enabled, v_desired)
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.set_my_2fa_enabled(BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_my_2fa_enabled(BOOLEAN) TO authenticated;
 
 -- =====================================================================
 -- 15. ÍNDICES DE PERFORMANCE E CONSULTAS RÁPIDAS

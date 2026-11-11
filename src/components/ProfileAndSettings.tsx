@@ -42,6 +42,7 @@ import { isAccountBlocked } from '../lib/blockedAccounts';
 import { saveCompanyProfile } from '../lib/companyService';
 import { validatePasswordStrength } from '../lib/securityValidation';
 import { recordAuditLog } from '../lib/auditLogService';
+import { updateOwn2FASetting } from '../lib/twoFactorSettingsService';
 
 interface ProfileAndSettingsProps {
   user: User | null;
@@ -830,7 +831,51 @@ export default function ProfileAndSettings({
                 </div>
               </div>
 
-              <div className="p-6">
+              <div className="p-6 space-y-3">
+                <div className="p-4 rounded-[12px] bg-slate-50 border border-slate-100 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-gray-900">
+                        Verificação de 2 Etapas (2FA)
+                      </span>
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
+                        user?.is2FAEnabled
+                          ? 'bg-emerald-500/15 text-emerald-700'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}>
+                        {user?.is2FAEnabled ? 'Ativo' : 'Desativado'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {user?.is2FAEnabled
+                        ? 'Solicita código de 8 dígitos por e-mail ao fazer login.'
+                        : 'Desativado pelo titular: login direto sem código 2FA.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(user?.is2FAEnabled)}
+                    onClick={async () => {
+                      if (!user) return;
+                      const next = !Boolean(user.is2FAEnabled);
+                      await updateOwn2FASetting(user, next, onSetUser);
+                      toast.success(
+                        next
+                          ? 'Verificação 2FA ativada na sua conta.'
+                          : 'Verificação 2FA desativada na sua conta.'
+                      );
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer ${
+                      user?.is2FAEnabled ? 'bg-indigo-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform ${
+                      user?.is2FAEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+
                 <button
                   onClick={() => onNavigate('change-password')}
                   className="w-full flex items-center justify-between px-4 py-3 rounded-[12px] bg-indigo-50 text-indigo-700 font-semibold hover:bg-indigo-100 transition-colors cursor-pointer group"

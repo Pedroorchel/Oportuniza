@@ -362,7 +362,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
               Verificação em 2 Etapas (2FA)
             </h1>
             <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-xs mx-auto">
-              Digite o código de verificação de 8 dígitos para autorizar o acesso ao <strong>Painel Administrativo</strong>.
+              O 2FA está ativado nesta conta. Digite o código de 8 dígitos para acessar o <strong>Painel Administrativo</strong> (gerenciável no cabeçalho do painel).
             </p>
           </div>
         </div>

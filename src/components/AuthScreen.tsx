@@ -48,6 +48,10 @@ import {
   markSession2FAVerified,
   clearSession2FAVerification
 } from '../lib/twoFactorSession';
+import {
+  resolveStored2FAPref,
+  persistLocal2FAPref
+} from '../lib/twoFactorSettingsService';
 
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
@@ -139,6 +143,7 @@ export default function AuthScreen({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lgpdAccepted, setLgpdAccepted] = useState(false);
+  const [enable2FAOnSignup, setEnable2FAOnSignup] = useState(true);
   const [showLgpdModal, setShowLgpdModal] = useState(false);
 
   const [verificationSent, setVerificationSent] = useState(false);
@@ -320,7 +325,28 @@ export default function AuthScreen({
       setAdminFailedAttempts(0);
       setAdminLockoutUntil(0);
       clearSession2FAVerification();
-      setSuccess('Credenciais validadas! Redirecionando para verificação 2FA...');
+
+      let admin2FAEnabled: boolean | undefined = undefined;
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user && cleanEmailAddress(sessionData.session.user.email) === 'oportunizahw@gmail.com') {
+          const bundle = await fetchProfileBundle(sessionData.session.user);
+          if (typeof bundle.dbUser?.is_2fa_enabled === 'boolean') {
+            admin2FAEnabled = bundle.dbUser.is_2fa_enabled;
+          }
+        }
+      } catch {}
+
+      if (typeof admin2FAEnabled !== 'boolean') {
+        const localAdminPref = resolveStored2FAPref('oportunizahw@gmail.com');
+        admin2FAEnabled = typeof localAdminPref === 'boolean' ? localAdminPref : true;
+      }
+
+      setSuccess(
+        admin2FAEnabled
+          ? 'Credenciais validadas! Redirecionando para verificação 2FA...'
+          : 'Credenciais validadas! Acessando Painel Administrativo...'
+      );
       try {
         await recordAuditLog({
           actor_name: 'Administrador Orchent',
@@ -329,7 +355,9 @@ export default function AuthScreen({
           action: 'Autenticação Primária Admin Autorizada',
           target_name: 'Painel Administrativo Oportuniza',
           target_type: 'security',
-          details: 'Credenciais primárias validadas; aguardando código 2FA por e-mail.',
+          details: admin2FAEnabled
+            ? 'Credenciais primárias validadas; aguardando código 2FA por e-mail.'
+            : 'Credenciais primárias validadas; acesso direto conforme preferência 2FA do titular.',
           status: 'authorized'
         });
       } catch {}
@@ -341,7 +369,7 @@ export default function AuthScreen({
         isAdmin: true,
         role: 'Administrador',
         cargo: 'Administrador',
-        is2FAEnabled: true
+        is2FAEnabled: admin2FAEnabled
       };
       setTimeout(() => {
         setLoading(false);
@@ -927,12 +955,14 @@ export default function AuthScreen({
             }
             return;
           } else {
-            // Admin fallback (exige validação administrativa server/hash e obriga 2FA na próxima tela)
+            // Admin fallback (respeita a escolha 2FA do administrador titular)
             if (cleanEmail === 'oportunizahw@gmail.com') {
               const adminCheck = await verifyAdminCredentials(cleanEmail, password);
               if (adminCheck.authorized) {
                 setLoginFailedAttempts(0);
                 setLoginLockoutUntil(0);
+                const localAdminPref = resolveStored2FAPref(cleanEmail);
+                const admin2FAEnabled = typeof localAdminPref === 'boolean' ? localAdminPref : true;
                 const adminFallback: AppUser = {
                   id: '00000000-0000-4000-8000-000000000604',
                   name: 'Administrador Orchent',
@@ -940,7 +970,7 @@ export default function AuthScreen({
                   isAdmin: true,
                   role: 'Administrador',
                   cargo: 'Administrador',
-                  is2FAEnabled: true
+                  is2FAEnabled: admin2FAEnabled
                 };
                 setLoading(false);
                 if (onLoginSuccess) {
@@ -1042,6 +1072,7 @@ export default function AuthScreen({
           requires_activation: true,
           account_activated: false,
           profile_completed: true,
+          is_2fa_enabled: enable2FAOnSignup,
           role: accountType === 'company' ? 'Empresa' : 'Candidato',
           cargo: accountType === 'company' ? 'Empresa' : 'Estudante'
         };
@@ -1104,6 +1135,7 @@ export default function AuthScreen({
           phone: phone.trim(),
           skills: [],
           favorites: [],
+          is2FAEnabled: enable2FAOnSignup,
           status: 'pending',
           accountType: accountType === 'company' ? 'company' : 'candidate',
           companyName: accountType === 'company' ? companyName.trim() : undefined,
@@ -1570,12 +1602,13 @@ export default function AuthScreen({
           id: resolvedUserId,
           email: targetEmail || existingUser.email,
           status: 'active',
-          is2FAEnabled: true
+          is2FAEnabled: Boolean(existingUser.is2FAEnabled)
         };
 
         if (typeof window !== 'undefined') {
           localStorage.setItem(`oportuniza-activated-${restoredUser.email}`, 'true');
           localStorage.setItem('oportuniza-current-user', JSON.stringify(restoredUser));
+          persistLocal2FAPref(restoredUser.email, Boolean(restoredUser.is2FAEnabled));
           sessionStorage.removeItem('oportuniza-reg-in-progress');
         }
 
@@ -1591,14 +1624,12 @@ export default function AuthScreen({
         try {
           if (
             dbUserRecord?.id &&
-            (String(dbUserRecord.status || '').toLowerCase() !== 'active' ||
-              dbUserRecord.is_2fa_enabled === false)
+            String(dbUserRecord.status || '').toLowerCase() !== 'active'
           ) {
             await supabase
               .from('users')
               .update({
                 status: 'active',
-                is_2fa_enabled: true,
                 account_type: restoredUser.accountType || 'candidate',
                 updated_at: new Date().toISOString()
               })
@@ -1760,6 +1791,7 @@ export default function AuthScreen({
         education: resolvedEducation,
         experience: resolvedExperience,
         status: 'active',
+        is2FAEnabled: enable2FAOnSignup,
         accountType: accountType === 'company' ? 'company' : 'candidate',
         companyName: accountType === 'company' ? companyName.trim() : undefined,
         cnpj: accountType === 'company' ? cnpj.trim() : undefined,
@@ -1786,7 +1818,7 @@ export default function AuthScreen({
       const fullPayload: Record<string, any> = {
         ...basePayload,
         status: 'active',
-        is_2fa_enabled: true,
+        is_2fa_enabled: enable2FAOnSignup,
         account_type: activatedUser.accountType,
         role: resolvedRole,
         cargo: resolvedCargo
@@ -1826,6 +1858,7 @@ export default function AuthScreen({
       if (typeof window !== 'undefined') {
         localStorage.setItem(`oportuniza-activated-${cleanTargetEmail}`, 'true');
         localStorage.setItem('oportuniza-current-user', JSON.stringify(activatedUser));
+        persistLocal2FAPref(cleanTargetEmail, enable2FAOnSignup);
         sessionStorage.removeItem('oportuniza-reg-in-progress');
       }
 
@@ -1853,6 +1886,7 @@ export default function AuthScreen({
             responsible_name: accountType === 'company' ? responsibleName.trim() : undefined,
             company_segment: accountType === 'company' ? companySegment : undefined,
             company_neighborhood: accountType === 'company' ? companyNeighborhood : undefined,
+            is_2fa_enabled: enable2FAOnSignup,
             account_activated: true,
             profile_completed: true,
             requires_activation: false
@@ -1867,10 +1901,10 @@ export default function AuthScreen({
           actor_name: displayName,
           actor_email: cleanTargetEmail,
           actor_role: resolvedRole,
-          action: 'Ativação 2FA & Cadastro OAuth Concluído',
+          action: 'Ativação & Cadastro OAuth Concluído',
           target_name: cleanTargetEmail,
           target_type: 'security',
-          details: `Usuário ativado com código 2FA e perfil (${activatedUser.accountType}) concluído.`,
+          details: `Perfil (${activatedUser.accountType}) concluído com 2FA ${enable2FAOnSignup ? 'ativado' : 'desativado'} por opção do titular.`,
           status: 'authorized'
         });
       } catch {}
@@ -1878,7 +1912,7 @@ export default function AuthScreen({
       setSuccess('Conta ativada e informações salvas com sucesso! Entrando...');
       setTimeout(() => {
         if (onLoginSuccess) {
-          onLoginSuccess({ ...activatedUser, is2FAEnabled: true });
+          onLoginSuccess({ ...activatedUser, is2FAEnabled: enable2FAOnSignup });
         }
       }, 700);
     } catch (err: any) {
@@ -1976,6 +2010,10 @@ export default function AuthScreen({
     }
 
     const userId = sessionUser?.id || verifiedSessionUserId || tempLoggedUser?.id || 'usr-' + Date.now();
+    const chosen2FA =
+      typeof tempLoggedUser?.is2FAEnabled === 'boolean'
+        ? tempLoggedUser.is2FAEnabled
+        : enable2FAOnSignup;
     const baseUser: AppUser = {
       ...(tempLoggedUser || {
         name: sessionUser?.user_metadata?.full_name || email.split('@')[0] || 'Usuário',
@@ -1983,6 +2021,7 @@ export default function AuthScreen({
       }),
       id: userId,
       email: (tempLoggedUser?.email || sessionUser?.email || email).trim().toLowerCase(),
+      is2FAEnabled: chosen2FA,
       status: 'active'
     };
     const cleanFinalEmail = baseUser.email.trim().toLowerCase();
@@ -1992,6 +2031,7 @@ export default function AuthScreen({
         sessionStorage.removeItem('oportuniza-reg-in-progress');
         localStorage.setItem(`oportuniza-activated-${cleanFinalEmail}`, 'true');
         localStorage.setItem('oportuniza-current-user', JSON.stringify(baseUser));
+        persistLocal2FAPref(cleanFinalEmail, chosen2FA);
       }
 
       const basePayload = {
@@ -2010,7 +2050,7 @@ export default function AuthScreen({
       const fullPayload: Record<string, any> = {
         ...basePayload,
         status: 'active',
-        is_2fa_enabled: true,
+        is_2fa_enabled: chosen2FA,
         account_type: baseUser.accountType || 'candidate',
         role: baseUser.role || 'Candidato',
         cargo: baseUser.cargo || 'Estudante'
@@ -2051,6 +2091,7 @@ export default function AuthScreen({
         try {
           await supabase.auth.updateUser({
             data: {
+              is_2fa_enabled: chosen2FA,
               account_activated: true,
               profile_completed: true,
               requires_activation: false
@@ -2069,7 +2110,7 @@ export default function AuthScreen({
           action: 'Ativação de Conta por E-mail',
           target_name: cleanFinalEmail,
           target_type: 'security',
-          details: `Cadastro ativado por código de 8 dígitos (${baseUser.accountType || 'candidate'}).`,
+          details: `Cadastro ativado por código de 8 dígitos (${baseUser.accountType || 'candidate'}) · 2FA ${chosen2FA ? 'ativado' : 'desativado'} pelo titular.`,
           status: 'authorized'
         });
       } catch {}
@@ -2084,7 +2125,7 @@ export default function AuthScreen({
       
       setTimeout(() => {
         if (onLoginSuccess) {
-          onLoginSuccess({ ...baseUser, is2FAEnabled: true });
+          onLoginSuccess({ ...baseUser, is2FAEnabled: chosen2FA });
         }
       }, 900);
     } catch (err: any) {
@@ -2139,7 +2180,7 @@ export default function AuthScreen({
                 </div>
 
                 <span className="inline-block px-3 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200/80 dark:border-cyan-800 text-[10px] font-bold text-[#3d90ad] dark:text-[#52B4D8] uppercase tracking-wider mb-3">
-                  Verificação Obrigatória (2FA)
+                  Verificação de Segurança (2FA)
                 </span>
 
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
@@ -2515,6 +2556,42 @@ export default function AuthScreen({
                       </div>
                     </div>
                   )}
+
+                  {/* Preferência de Verificação em Duas Etapas (2FA) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3 text-left">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                          Verificação em Duas Etapas (2FA)
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          enable2FAOnSignup
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                        }`}>
+                          {enable2FAOnSignup ? 'Ativo' : 'Desativado'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5">
+                        Escolha se deseja receber código de 8 dígitos nos próximos logins (pode alterar depois).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={enable2FAOnSignup}
+                      onClick={() => setEnable2FAOnSignup((prev) => !prev)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer ${
+                        enable2FAOnSignup ? 'bg-[#52A8C7]' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform ${
+                          enable2FAOnSignup ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
 
                   <div className="pt-2 px-1 text-left">
                     <label className="flex items-start gap-2.5 cursor-pointer group">
@@ -3374,6 +3451,44 @@ export default function AuthScreen({
                           {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* ---------------- PREFERÊNCIA OPCIONAL DE 2FA ---------------- */}
+                  {!isLogin && !isRecover && (
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3 text-left">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                            Verificação em Duas Etapas (2FA)
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            enable2FAOnSignup
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}>
+                            {enable2FAOnSignup ? 'Ativo' : 'Desativado'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5">
+                          Opcional: você decide se quer confirmar código por e-mail ao entrar na conta.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enable2FAOnSignup}
+                        onClick={() => setEnable2FAOnSignup((prev) => !prev)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer ${
+                          enable2FAOnSignup ? 'bg-[#52A8C7]' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform ${
+                            enable2FAOnSignup ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </div>
                   )}
 

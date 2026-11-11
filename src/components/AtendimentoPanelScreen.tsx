@@ -20,14 +20,16 @@ import {
 } from '../lib/supportService';
 import { supabase } from '../lib/supabaseClient';
 import { resolveUserHierarchyTier } from '../lib/hierarchyRoles';
+import { updateOwn2FASetting } from '../lib/twoFactorSettingsService';
 
 interface AtendimentoPanelScreenProps {
   user: User;
   onLogout: () => void;
   onNavigateHome?: () => void;
+  onUpdateUser?: (updatedUser: User) => void;
 }
 
-export default function AtendimentoPanelScreen({ user, onLogout, onNavigateHome }: AtendimentoPanelScreenProps) {
+export default function AtendimentoPanelScreen({ user, onLogout, onNavigateHome, onUpdateUser }: AtendimentoPanelScreenProps) {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [ticketMessages, setTicketMessages] = useState<SupportTicketMessage[]>([]);
@@ -392,6 +394,33 @@ export default function AtendimentoPanelScreen({ user, onLogout, onNavigateHome 
               <span className="text-xs font-bold text-slate-200">{user.name || 'Operador de Atendimento'}</span>
               <span className="text-[10px] text-cyan-400 font-mono">{user.email}</span>
             </div>
+
+            <button
+              type="button"
+              onClick={async () => {
+                const next = !Boolean(user.is2FAEnabled);
+                await updateOwn2FASetting(user, next, onUpdateUser);
+                showToast(
+                  next
+                    ? 'Verificação em Duas Etapas (2FA) ativada para sua conta.'
+                    : 'Verificação em Duas Etapas (2FA) desativada na sua conta.',
+                  next ? 'success' : 'info'
+                );
+              }}
+              title={
+                user.is2FAEnabled
+                  ? '2FA Ativo na sua conta (clique para desativar)'
+                  : '2FA Desativado na sua conta (clique para ativar)'
+              }
+              className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                user.is2FAEnabled
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{user.is2FAEnabled ? '2FA Ativo' : '2FA Off'}</span>
+            </button>
 
             <button
               onClick={() => loadTicketsData()}

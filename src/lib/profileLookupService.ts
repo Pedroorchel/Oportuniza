@@ -141,8 +141,13 @@ export function resolveIsAccountActivated(params: {
   const isOAuthSession = authProvider !== '' && authProvider !== 'email';
 
   if (isOAuthSession) {
-    // Existing OAuth account previously completed or filled education/experience
-    return hasEduOrExp;
+    // Existing OAuth account previously completed or updated settings (e.g., toggled 2FA)
+    const hasUpdatedTimestamp = Boolean(
+      dbUser.updated_at &&
+        dbUser.created_at &&
+        new Date(dbUser.updated_at).getTime() > new Date(dbUser.created_at).getTime() + 1000
+    );
+    return hasEduOrExp || (dbStatus === 'active' && hasUpdatedTimestamp);
   }
 
   // Email/password account with non-pending status
@@ -378,6 +383,16 @@ export function mapDatabaseRecordToAppUser(params: {
     : dbUser?.avatar_url || cachedUser?.avatarUrl || meta.avatar_url || '';
 
   const fallbackName = cleanEmail ? cleanEmail.split('@')[0] : 'Usuário';
+  const resolvedIs2FAEnabled =
+    typeof dbUser?.is_2fa_enabled === 'boolean'
+      ? dbUser.is_2fa_enabled
+      : typeof dbUser?.is2FAEnabled === 'boolean'
+      ? dbUser.is2FAEnabled
+      : typeof meta?.is_2fa_enabled === 'boolean'
+      ? meta.is_2fa_enabled
+      : typeof cachedUser?.is2FAEnabled === 'boolean'
+      ? cachedUser.is2FAEnabled
+      : false;
 
   return {
     id: resolvedId,
@@ -464,7 +479,7 @@ export function mapDatabaseRecordToAppUser(params: {
     updatedAt: dbUser?.updated_at,
     isAdmin: isAdminUser,
     isBlocked: false,
-    is2FAEnabled: true,
+    is2FAEnabled: resolvedIs2FAEnabled,
     status: isActivated ? 'active' : 'pending',
     role: userRole,
     cargo: userCargo

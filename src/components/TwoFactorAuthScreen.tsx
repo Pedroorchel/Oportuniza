@@ -315,7 +315,7 @@ export default function TwoFactorAuthScreen({
           action: 'Verificação em Duas Etapas (2FA) - Login',
           target_name: user.email || 'Portal Oportuniza',
           target_type: 'security',
-          details: `Login confirmado com verificação obrigatória 2FA para ${user.email} (${accountBadgeLabel}).`,
+          details: `Login confirmado com verificação em duas etapas (2FA) para ${user.email} (${accountBadgeLabel}).`,
           status: 'authorized'
         });
       } catch (err) {
@@ -392,14 +392,14 @@ export default function TwoFactorAuthScreen({
               ) : (
                 <UserIcon className="w-3 h-3" />
               )}
-              <span>2FA Obrigatório · {accountBadgeLabel}</span>
+              <span>2FA Ativo · {accountBadgeLabel}</span>
             </span>
 
             <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
               Verificação em Duas Etapas
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs mx-auto">
-              Por segurança, toda tentativa de login exige a confirmação do código de 8 dígitos enviado para o seu e-mail.
+              O 2FA está ativado na sua conta. Digite o código de 8 dígitos enviado ao seu e-mail (você pode desativá-lo nas configurações após entrar).
             </p>
           </div>
         </div>

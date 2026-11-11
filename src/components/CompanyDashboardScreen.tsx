@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabaseClient';
 import { toast } from '../lib/toast';
 import { mockJobs, deleteJobPermanently } from '../data';
 import { sanitizeExternalUrl } from '../lib/securityValidation';
+import { updateOwn2FASetting } from '../lib/twoFactorSettingsService';
 
 interface CompanyDashboardScreenProps {
   user: User;
@@ -1372,6 +1373,62 @@ export default function CompanyDashboardScreen({ user, onLogout, onUpdateUser }:
                 Salvar Alterações
               </button>
             </form>
+
+            {/* Segurança da Conta Corporativa - Escolha 2FA do Titular */}
+            <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#52A8C7]" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Segurança da Conta Corporativa
+                </h3>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      Verificação em Duas Etapas (2FA)
+                    </span>
+                    <span className={`px-2 py-0.5 text-[10px] font-black rounded-md uppercase ${
+                      user.is2FAEnabled
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}>
+                      {user.is2FAEnabled ? 'Ativo' : 'Desativado'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                    {user.is2FAEnabled
+                      ? 'Solicita código de 8 dígitos no e-mail da empresa ao acessar o painel.'
+                      : 'Desativado pelo titular: login direto no painel empresarial sem exigir código 2FA.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(user.is2FAEnabled)}
+                  onClick={async () => {
+                    const next = !Boolean(user.is2FAEnabled);
+                    await updateOwn2FASetting(user, next, onUpdateUser);
+                    toast.success(
+                      next
+                        ? 'Verificação em Duas Etapas (2FA) ativada para esta conta corporativa.'
+                        : 'Verificação em Duas Etapas (2FA) desativada para esta conta corporativa.'
+                    );
+                  }}
+                  aria-label="Alternar verificação em duas etapas da empresa"
+                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer ${
+                    user.is2FAEnabled ? 'bg-[#52A8C7]' : 'bg-slate-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`h-5 w-5 rounded-full bg-white shadow-xs mt-0.5 ml-0.5 transition-transform ${
+                      user.is2FAEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>
