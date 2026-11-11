@@ -4,6 +4,12 @@ import { ScreenId, User, Job, Application, Course, Enrollment, UserCourseProgres
 import { mockJobs, mockCourses, loadJobsFromSupabase, loadCoursesFromSupabase } from './data';
 import { supabase } from './lib/supabaseClient';
 import { isAccountBlocked, isUserRecordBlocked, fetchAccountBlockReason, extractBlockReasonFromRecord } from './lib/blockedAccounts';
+import {
+  cleanEmailAddress,
+  fetchProfileBundle,
+  mapDatabaseRecordToAppUser,
+  resolveIsAccountActivated
+} from './lib/profileLookupService';
 import { toast } from './lib/toast';
 import ToastContainer from './components/ToastContainer';
 import { isImageAssetUrl, resolveAssetUrl } from './lib/assets';
@@ -575,37 +581,12 @@ export default function App() {
           cargo: isCompMeta ? 'Empresa' : 'Estudante'
         };
         
-        // Fetch profile with database validation
+        // Fetch profile with resilient multi-source lookup (RPC + ID/email + company + activity)
         const fetchProfile = async () => {
           try {
-            let { data } = await supabase
-              .from('users')
-              .select('*')
-              .eq('id', supabaseUser.id)
-              .maybeSingle();
-
-            if (!data && cleanEmail) {
-              const { data: byEmail } = await supabase
-                .from('users')
-                .select('*')
-                .ilike('email', cleanEmail)
-                .maybeSingle();
-              if (byEmail) {
-                data = byEmail;
-              }
-            }
-
-            let companyData: any = null;
-            if (cleanEmail) {
-              const { data: cRow } = await supabase
-                .from('companies')
-                .select('*')
-                .ilike('email', cleanEmail)
-                .maybeSingle();
-              if (cRow) {
-                companyData = cRow;
-              }
-            }
+            const bundle = await fetchProfileBundle(supabaseUser);
+            const data = bundle.dbUser;
+            const companyData = bundle.companyData;
 
             if (data || companyData) {
               let cachedUser: any = null;
@@ -613,13 +594,15 @@ export default function App() {
                 const raw = localStorage.getItem('oportuniza-current-user');
                 if (raw) {
                   const parsed = JSON.parse(raw);
-                  if (parsed && parsed.email && parsed.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
+                  if (parsed && parsed.email && cleanEmailAddress(parsed.email) === cleanEmail) {
                     cachedUser = parsed;
                   }
                 }
               } catch (e) {}
 
-              const isBlocked = isUserRecordBlocked(data || {});
+              const isBlocked =
+                isUserRecordBlocked(data || {}) ||
+                String(companyData?.status || '').trim().toLowerCase() === 'blocked';
               if (isBlocked) {
                 console.warn("Usuário bloqueado no banco tentou acessar:", cleanEmail);
                 const blockReason = extractBlockReasonFromRecord(data) || await fetchAccountBlockReason({ id: supabaseUser.id, email: cleanEmail });
@@ -634,101 +617,63 @@ export default function App() {
                 setCompletedCourses([]);
                 setBlockedNotice({
                   email: cleanEmail || 'Sua conta',
-                  name: data?.name || cleanEmail,
+                  name: data?.name || companyData?.company_name || cleanEmail,
                   reason: blockReason
                 });
                 setCurrentScreen('landing');
                 return;
               }
 
-              const isAdminUser = Boolean(
-                data?.is_admin ||
-                data?.isAdmin ||
-                data?.role === 'Administrador' ||
-                data?.cargo === 'Administrador' ||
-                cleanEmail === 'oportunizahw@gmail.com'
-              );
+              const isActivated = resolveIsAccountActivated({
+                authUser: supabaseUser,
+                dbUser: data,
+                companyData,
+                hasActivity: bundle.hasActivity,
+                hasPassword: bundle.hasPassword,
+                cleanEmail
+              });
 
-              // Accurately determine if the user is a Company account
-              const explicitType = String(data?.account_type || data?.accountType || supabaseUser.user_metadata?.account_type || '').toLowerCase();
-              const roleLower = String(data?.role || data?.cargo || supabaseUser.user_metadata?.role || '').toLowerCase();
+              const dbLoadedUser = mapDatabaseRecordToAppUser({
+                authUser: supabaseUser,
+                dbUser: data,
+                companyData,
+                cleanEmail,
+                isActivated,
+                cachedUser
+              });
 
-              let isCompanyAccount = false;
-              if (explicitType === 'company' || roleLower === 'empresa') {
-                isCompanyAccount = true;
-              } else if (explicitType === 'candidate' || roleLower === 'candidato' || roleLower === 'estudante') {
-                isCompanyAccount = false;
-              } else if (companyData && companyData.user_id === supabaseUser.id && (data?.account_type === 'company' || data?.role === 'Empresa')) {
-                isCompanyAccount = true;
-              }
-
-              const dbExplicitPending = String(data?.status || '').toLowerCase() === 'pending';
-              const hasCompletedProfileInDb = Boolean(
-                data &&
-                String(data.status || '').toLowerCase() === 'active' &&
-                (
-                  String(data.phone || '').replace(/\D/g, '').length >= 8 ||
-                  Boolean(String(data.bio || '').trim()) ||
-                  Boolean(String(data.company_name || '').trim()) ||
-                  Boolean(String(data.cnpj || '').trim())
-                )
-              );
-
-              const isActivated = Boolean(
-                isAdminUser ||
-                isActivatedInMeta ||
-                isActivatedLocally ||
-                (!dbExplicitPending && (
-                  isOAuthSession
-                    ? (hasCompletedProfileInDb || Boolean(companyData && String(companyData.status || '').toLowerCase() === 'active'))
-                    : (supabaseUser.user_metadata?.requires_activation !== true || hasCompletedProfileInDb)
-                ))
-              );
-
-              const rawDbRole = data?.role || data?.cargo;
-              const userRole = rawDbRole || (isAdminUser ? 'Administrador' : (isCompanyAccount ? 'Empresa' : 'Candidato'));
-              const userCargo = data?.cargo || rawDbRole || (isAdminUser ? 'Administrador' : (isCompanyAccount ? 'Empresa' : 'Estudante'));
-              const logoUrl = isCompanyAccount 
-                ? (data?.company_logo_url || data?.companyLogoUrl || data?.avatar_url || companyData?.logo_url || companyData?.avatar_url || cachedUser?.companyLogoUrl || cachedUser?.avatarUrl || '') 
-                : (data?.avatar_url || cachedUser?.avatarUrl || initialUser.avatarUrl || '');
-
-              const dbLoadedUser: User = {
-                id: supabaseUser.id,
-                name: isCompanyAccount 
-                  ? (companyData?.company_name || data?.company_name || data?.name || cachedUser?.name || initialUser.name)
-                  : (data?.name || cachedUser?.name || initialUser.name),
-                email: data?.email || cleanEmail || initialUser.email,
-                avatarUrl: logoUrl,
-                companyLogoUrl: isCompanyAccount ? logoUrl : undefined,
-                companyName: isCompanyAccount ? (companyData?.company_name || data?.company_name || data?.companyName || cachedUser?.companyName || '') : undefined,
-                cnpj: isCompanyAccount ? (companyData?.cnpj || data?.cnpj || cachedUser?.cnpj || '') : undefined,
-                responsibleName: isCompanyAccount ? (companyData?.responsible_name || data?.responsible_name || data?.responsibleName || cachedUser?.responsibleName || '') : undefined,
-                companySegment: isCompanyAccount ? (companyData?.segment || data?.company_segment || data?.companySegment || cachedUser?.companySegment || '') : undefined,
-                companyNeighborhood: isCompanyAccount ? (companyData?.neighborhood || data?.company_neighborhood || data?.companyNeighborhood || cachedUser?.companyNeighborhood || '') : undefined,
-                accountType: isCompanyAccount ? 'company' : 'candidate',
-                bio: data?.bio || (isCompanyAccount ? companyData?.bio : '') || cachedUser?.bio || '',
-                education: data?.education || (isCompanyAccount ? 'Empresa / Empregador' : 'Ensino Médio em andamento'),
-                experience: data?.experience || (isCompanyAccount ? 'Empresa Contratante em Araucária' : 'Nenhuma registrada'),
-                phone: (isCompanyAccount ? companyData?.phone : null) || data?.phone || supabaseUser.user_metadata?.phone || '',
-                skills: Array.isArray(data?.skills) ? data.skills : [],
-                favorites: initialUser.favorites || [],
-                notificationsEnabled: data?.notifications_enabled ?? true,
-                marketingEmailsEnabled: data?.marketing_emails_enabled ?? false,
-                updatedAt: data?.updated_at,
-                isAdmin: isAdminUser,
-                isBlocked: false,
-                is2FAEnabled: true,
-                status: isActivated ? 'active' : 'pending',
-                role: userRole,
-                cargo: userCargo
-              };
-
+              const isAdminUser = Boolean(dbLoadedUser.isAdmin);
               const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
               const isPrivilegedLoaded = isAdminUser || loadedTier.id === 'support_service';
               const verifiedForSession = isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email, {
                 isPrivileged: isPrivilegedLoaded,
                 expectedRoleSignature: buildSessionRoleSignature(dbLoadedUser.role, isAdminUser)
               });
+
+              if (isActivated && cleanEmail) {
+                try {
+                  localStorage.setItem(`oportuniza-activated-${cleanEmail}`, 'true');
+                } catch {}
+
+                // Self-heal stale pending flags silently if DB row wasn't updated via RPC yet
+                if (
+                  data &&
+                  data.id &&
+                  (String(data.status || '').trim().toLowerCase() === 'pending' || data.is_2fa_enabled === false)
+                ) {
+                  supabase
+                    .from('users')
+                    .update({
+                      status: 'active',
+                      is_2fa_enabled: true,
+                      account_type: dbLoadedUser.accountType || 'candidate',
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', data.id)
+                    .then(() => {}, () => {});
+                }
+              }
+
               setIsLogin2FAVerified(verifiedForSession);
               setIsAdmin2FAVerified(isAdminUser ? verifiedForSession : false);
               setUser(dbLoadedUser);
@@ -777,37 +722,87 @@ export default function App() {
                 (!isOAuthSession && supabaseUser.user_metadata?.requires_activation !== true)
               );
 
-              // Create default row in the 'users' table ONLY if user is verified NOT blocked (fallback safely if status column does not exist yet)
+              // Create default row in the 'users' table ONLY if user is verified NOT blocked (handle email 23505 conflicts safely)
               try {
                 const { error: upsertErr1 } = await supabase
                   .from('users')
                   .upsert({
                     id: supabaseUser.id,
                     name: initialUser.name,
-                    email: initialUser.email,
+                    email: cleanEmail || initialUser.email,
                     avatar_url: initialUser.avatarUrl,
                     education: isActivatedNew ? 'Ensino Médio em andamento' : '',
                     experience: isActivatedNew ? 'Nenhuma registrada' : '',
                     phone: '',
                     skills: [],
+                    is_2fa_enabled: isActivatedNew,
                     status: isActivatedNew ? 'active' : 'pending'
                   }, { onConflict: 'id' });
 
-                if (upsertErr1 && (upsertErr1.code === 'PGRST204' || (upsertErr1 as any).code === '42703' || upsertErr1.message?.includes('column'))) {
-                  await supabase
-                    .from('users')
-                    .upsert({
-                      id: supabaseUser.id,
-                      name: initialUser.name,
-                      email: initialUser.email,
-                      avatar_url: initialUser.avatarUrl,
-                      education: isActivatedNew ? 'Ensino Médio em andamento' : '',
-                      experience: isActivatedNew ? 'Nenhuma registrada' : '',
-                      phone: '',
-                      skills: []
-                    }, { onConflict: 'id' });
+                if (upsertErr1) {
+                  const errMsg1 = String(upsertErr1.message || '').toLowerCase();
+                  const isMissingCol1 =
+                    upsertErr1.code === 'PGRST204' ||
+                    (upsertErr1 as any).code === '42703' ||
+                    errMsg1.includes('column');
+                  const isEmailConflict =
+                    upsertErr1.code === '23505' ||
+                    errMsg1.includes('duplicate') ||
+                    errMsg1.includes('email');
+
+                  if (isEmailConflict) {
+                    // Existing user found via unique email constraint — re-fetch their real bundle instead of overwriting!
+                    const retryBundle = await fetchProfileBundle(supabaseUser);
+                    if (retryBundle.dbUser || retryBundle.companyData) {
+                      const retryActivated = resolveIsAccountActivated({
+                        authUser: supabaseUser,
+                        dbUser: retryBundle.dbUser,
+                        companyData: retryBundle.companyData,
+                        hasActivity: retryBundle.hasActivity,
+                        hasPassword: retryBundle.hasPassword,
+                        cleanEmail
+                      });
+                      const retryUser = mapDatabaseRecordToAppUser({
+                        authUser: supabaseUser,
+                        dbUser: retryBundle.dbUser,
+                        companyData: retryBundle.companyData,
+                        cleanEmail,
+                        isActivated: retryActivated
+                      });
+                      const retryTier = resolveUserHierarchyTier(retryUser);
+                      const retryPrivileged = Boolean(retryUser.isAdmin) || retryTier.id === 'support_service';
+                      const retryVerified = isSession2FAVerified(retryUser.id, retryUser.email, {
+                        isPrivileged: retryPrivileged,
+                        expectedRoleSignature: buildSessionRoleSignature(retryUser.role, Boolean(retryUser.isAdmin))
+                      });
+                      setIsLogin2FAVerified(retryVerified);
+                      setIsAdmin2FAVerified(retryUser.isAdmin ? retryVerified : false);
+                      setUser(retryUser);
+                      if (!retryUser.isAdmin && retryUser.status === 'pending') {
+                        setCurrentScreen('register');
+                      } else if (retryUser.isAdmin) {
+                        setCurrentScreen('admin');
+                      } else if (retryTier.id === 'support_service') {
+                        setCurrentScreen('atendimento');
+                      }
+                      fetchApplications();
+                      return;
+                    }
+                  } else if (isMissingCol1) {
+                    await supabase
+                      .from('users')
+                      .upsert({
+                        id: supabaseUser.id,
+                        name: initialUser.name,
+                        email: cleanEmail || initialUser.email,
+                        avatar_url: initialUser.avatarUrl,
+                        education: isActivatedNew ? 'Ensino Médio em andamento' : '',
+                        experience: isActivatedNew ? 'Nenhuma registrada' : '',
+                        phone: '',
+                        skills: []
+                      }, { onConflict: 'id' });
+                  }
                 }
-                console.log("Profile created successfully in database for:", initialUser.email);
               } catch (upsertErr) {
                 console.error("Failed to auto-upsert user on session change:", upsertErr);
               }

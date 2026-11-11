@@ -260,15 +260,16 @@ export async function saveCompanyProfile(companyData: Partial<Company> & { compa
       payload.user_id = completeCompany.user_id;
     }
 
-    const { data, error } = await supabase
+    const { data: savedRows, error } = await supabase
       .from('companies')
       .upsert({
         ...payload,
         email: cleanEmail
       }, { onConflict: 'email' })
       .select()
-      .maybeSingle();
+      .limit(1);
 
+    const data = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
     if (error) {
       console.warn('Aviso ao persistir na tabela "companies" do Supabase:', error.message);
     } else if (data) {

@@ -128,13 +128,16 @@ export async function checkEmailRegisteredOrBlocked(email: string): Promise<{
   }
 
   try {
-    const { data: existingUser } = await supabase
+    const { data: matchedUsers } = await supabase
       .from('users')
       .select('id, is_blocked, block_reason, status, role, cargo, bio, experience, education')
       .ilike('email', cleanEmail)
-      .maybeSingle();
+      .order('updated_at', { ascending: false })
+      .limit(5);
 
-    if (existingUser) {
+    if (Array.isArray(matchedUsers) && matchedUsers.length > 0) {
+      const existingUser =
+        matchedUsers.find((u: any) => isUserRecordBlocked(u)) || matchedUsers[0];
       const blocked = isUserRecordBlocked(existingUser);
       const reason = extractBlockReasonFromRecord(existingUser) || undefined;
       return { exists: true, isBlocked: blocked, blockReason: reason };
@@ -179,14 +182,18 @@ export async function fetchAccountBlockReason(identifier: { id?: string; email?:
   // Try checking in Supabase
   try {
     if (email) {
-      const { data } = await supabase
+      const { data: rowsByEmail } = await supabase
         .from('users')
         .select('block_reason, bio, experience, education, is_blocked, status, role')
         .ilike('email', email)
-        .maybeSingle();
+        .limit(5);
 
-      if (data) {
-        const found = extractBlockReasonFromRecord(data);
+      const matchedByEmail = Array.isArray(rowsByEmail)
+        ? rowsByEmail.find((r: any) => isUserRecordBlocked(r)) || rowsByEmail[0]
+        : null;
+
+      if (matchedByEmail) {
+        const found = extractBlockReasonFromRecord(matchedByEmail);
         if (found) {
           localReasons[email] = found;
           if (id) localReasons[id] = found;
@@ -197,14 +204,15 @@ export async function fetchAccountBlockReason(identifier: { id?: string; email?:
     }
 
     if (id) {
-      const { data } = await supabase
+      const { data: rowsById } = await supabase
         .from('users')
         .select('block_reason, bio, experience, education, is_blocked, status, role')
         .eq('id', id)
-        .maybeSingle();
+        .limit(1);
 
-      if (data) {
-        const found = extractBlockReasonFromRecord(data);
+      const matchedById = Array.isArray(rowsById) && rowsById.length > 0 ? rowsById[0] : null;
+      if (matchedById) {
+        const found = extractBlockReasonFromRecord(matchedById);
         if (found) {
           if (email) localReasons[email] = found;
           localReasons[id] = found;

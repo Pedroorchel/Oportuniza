@@ -347,12 +347,13 @@ export default function UserAuthScreens({
       }
 
       try {
-        const { data: existingUser } = await supabase
+        const { data: existingRows } = await supabase
           .from('users')
           .select('*')
           .ilike('email', cleanEmail)
-          .maybeSingle();
+          .limit(1);
 
+        const existingUser = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
         if (existingUser) {
           if (isUserRecordBlocked(existingUser)) {
             const reason = extractBlockReasonFromRecord(existingUser) || await fetchAccountBlockReason({ email: cleanEmail });

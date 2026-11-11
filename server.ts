@@ -1082,11 +1082,13 @@ app.post("/api/update-password", passwordUpdateRateLimit, async (req: any, res: 
   try {
     const hashedPassword = hashPasswordPbkdf2Server(newPassword);
 
-    const { data: existingUser, error: findError } = await supabase
+    const { data: existingRows, error: findError } = await supabase
       .from('users')
       .select('id, email')
       .ilike('email', cleanEmail)
-      .maybeSingle();
+      .limit(1);
+
+    const existingUser = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
 
     if (findError) {
       console.error(`Error finding user by email ${cleanEmail}:`, findError);
