@@ -97,6 +97,7 @@ const EDUCATION_OPTIONS = [
 interface AuthScreenProps {
   onNavigate?: (screen: ScreenId) => void;
   defaultIsLogin?: boolean;
+  defaultIsRecover?: boolean;
   onLoginSuccess?: (user: AppUser) => void;
   onAdminLoginSuccess?: (adminUser: any) => void;
   enforceVerificationUser?: AppUser;
@@ -106,6 +107,7 @@ interface AuthScreenProps {
 export default function AuthScreen({ 
   onNavigate, 
   defaultIsLogin = true, 
+  defaultIsRecover = false,
   onLoginSuccess, 
   onAdminLoginSuccess,
   enforceVerificationUser,
@@ -115,7 +117,7 @@ export default function AuthScreen({
   const [adminPassword, setAdminPassword] = useState('');
   
   const [isLogin, setIsLogin] = useState(defaultIsLogin);
-  const [isRecover, setIsRecover] = useState(false);
+  const [isRecover, setIsRecover] = useState(defaultIsRecover);
 
   // Account Type: candidate vs company (only Admin can assign Level 2 Atendimento)
   const [accountType, setAccountType] = useState<'candidate' | 'company'>('candidate');
@@ -205,8 +207,9 @@ export default function AuthScreen({
   useEffect(() => {
     if (!enforceVerificationUser) {
       setIsLogin(defaultIsLogin);
+      setIsRecover(defaultIsRecover);
     }
-  }, [defaultIsLogin, enforceVerificationUser]);
+  }, [defaultIsLogin, defaultIsRecover, enforceVerificationUser]);
 
   // Format CNPJ as 00.000.000/0000-00
   const handleCnpjChange = (value: string) => {
@@ -326,20 +329,21 @@ export default function AuthScreen({
       setAdminLockoutUntil(0);
       clearSession2FAVerification();
 
-      let admin2FAEnabled: boolean | undefined = undefined;
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData?.session?.user && cleanEmailAddress(sessionData.session.user.email) === 'oportunizahw@gmail.com') {
-          const bundle = await fetchProfileBundle(sessionData.session.user);
-          if (typeof bundle.dbUser?.is_2fa_enabled === 'boolean') {
-            admin2FAEnabled = bundle.dbUser.is_2fa_enabled;
+      let admin2FAEnabled: boolean | undefined = resolveStored2FAPref('oportunizahw@gmail.com');
+      if (typeof admin2FAEnabled !== 'boolean') {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.user && cleanEmailAddress(sessionData.session.user.email) === 'oportunizahw@gmail.com') {
+            const bundle = await fetchProfileBundle(sessionData.session.user);
+            if (typeof bundle.dbUser?.is_2fa_enabled === 'boolean') {
+              admin2FAEnabled = bundle.dbUser.is_2fa_enabled;
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
 
       if (typeof admin2FAEnabled !== 'boolean') {
-        const localAdminPref = resolveStored2FAPref('oportunizahw@gmail.com');
-        admin2FAEnabled = typeof localAdminPref === 'boolean' ? localAdminPref : true;
+        admin2FAEnabled = true;
       }
 
       setSuccess(
@@ -717,6 +721,7 @@ export default function AuthScreen({
             setRecoveryStep('request');
             setIsRecover(false);
             setIsLogin(true);
+            if (!enforceVerificationUser) onNavigate?.('login');
             setPassword('');
             setNewPassword('');
             setConfirmNewPassword('');
@@ -3375,6 +3380,7 @@ export default function AuthScreen({
                             onClick={() => {
                               setIsRecover(true);
                               setRecoveryStep('request');
+                              if (!enforceVerificationUser) onNavigate?.('recover');
                             }}
                             className="text-xs font-bold text-[#52A8C7] dark:text-[#52B4D8] hover:underline cursor-pointer"
                           >
@@ -3586,6 +3592,7 @@ export default function AuthScreen({
                         setRecoveryStep('request');
                         setError(null);
                         setSuccess(null);
+                        if (!enforceVerificationUser) onNavigate?.('login');
                       }}
                       className="text-[#52A8C7] dark:text-[#52B4D8] text-xs font-bold hover:underline cursor-pointer"
                     >
@@ -3604,7 +3611,13 @@ export default function AuthScreen({
                       <span>{isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}</span>
                       <button 
                         type="button"
-                        onClick={() => setIsLogin(!isLogin)}
+                        onClick={() => {
+                          const nextIsLogin = !isLogin;
+                          setIsLogin(nextIsLogin);
+                          if (!enforceVerificationUser) {
+                            onNavigate?.(nextIsLogin ? 'login' : 'register');
+                          }
+                        }}
                         className="text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer"
                       >
                         {isLogin ? 'Cadastre-se grátis' : 'Faça Login'}

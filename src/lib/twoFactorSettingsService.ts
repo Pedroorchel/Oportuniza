@@ -6,53 +6,13 @@ import {
   clearSession2FAVerification,
   markSession2FAVerified
 } from './twoFactorSession';
-import { cleanEmailAddress } from './profileLookupService';
+import {
+  cleanEmailAddress,
+  resolveStored2FAPref,
+  persistLocal2FAPref
+} from './profileLookupService';
 
-const PREF_KEY_PREFIX = 'oportuniza-2fa-pref-';
-
-export function resolveStored2FAPref(email?: string | null): boolean | undefined {
-  if (typeof window === 'undefined') return undefined;
-  const cleanEmail = cleanEmailAddress(email);
-  if (!cleanEmail) return undefined;
-  try {
-    const raw = window.localStorage.getItem(`${PREF_KEY_PREFIX}${cleanEmail}`);
-    if (raw === 'true') return true;
-    if (raw === 'false') return false;
-
-    const cachedRaw = window.localStorage.getItem('oportuniza-current-user');
-    if (cachedRaw) {
-      const parsed = JSON.parse(cachedRaw);
-      if (parsed && cleanEmailAddress(parsed.email) === cleanEmail && typeof parsed.is2FAEnabled === 'boolean') {
-        return parsed.is2FAEnabled;
-      }
-    }
-  } catch {
-    // Ignore storage read errors
-  }
-  return undefined;
-}
-
-export function persistLocal2FAPref(email: string | undefined | null, enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  const cleanEmail = cleanEmailAddress(email);
-  try {
-    if (cleanEmail) {
-      window.localStorage.setItem(`${PREF_KEY_PREFIX}${cleanEmail}`, String(Boolean(enabled)));
-    }
-    const cachedRaw = window.localStorage.getItem('oportuniza-current-user');
-    if (cachedRaw) {
-      const parsed = JSON.parse(cachedRaw);
-      if (parsed && (!cleanEmail || cleanEmailAddress(parsed.email) === cleanEmail)) {
-        window.localStorage.setItem(
-          'oportuniza-current-user',
-          JSON.stringify({ ...parsed, is2FAEnabled: Boolean(enabled) })
-        );
-      }
-    }
-  } catch {
-    // Ignore storage write errors
-  }
-}
+export { resolveStored2FAPref, persistLocal2FAPref };
 
 export interface Update2FAResult {
   ok: boolean;
@@ -107,43 +67,44 @@ export async function updateOwn2FASetting(
       const { error: rpcErr } = await supabase.rpc('set_my_2fa_enabled', {
         p_enabled: desired
       });
-
       if (!rpcErr) {
         syncedToDatabase = true;
-      } else {
-        const updatePayload = {
-          is_2fa_enabled: desired,
-          updated_at: nowIso
-        };
+      }
+    }
 
-        let updatedDirectly = false;
-        if (user.id && !String(user.id).startsWith('usr-')) {
-          const { error: eqErr } = await supabase
-            .from('users')
-            .update(updatePayload)
-            .eq('id', user.id);
-          if (!eqErr) {
-            updatedDirectly = true;
-          }
+    if (!syncedToDatabase) {
+      const updatePayload = {
+        is_2fa_enabled: desired,
+        updated_at: nowIso
+      };
+
+      let updatedDirectly = false;
+      if (user.id && !String(user.id).startsWith('usr-')) {
+        const { error: eqErr } = await supabase
+          .from('users')
+          .update(updatePayload)
+          .eq('id', user.id);
+        if (!eqErr) {
+          updatedDirectly = true;
         }
-
-        if (!updatedDirectly && cleanEmail) {
-          const { error: mailErr } = await supabase
-            .from('users')
-            .update(updatePayload)
-            .ilike('email', cleanEmail);
-          if (!mailErr) {
-            updatedDirectly = true;
-          } else {
-            dbErrorMsg = mailErr.message || rpcErr.message;
-          }
-        } else if (!updatedDirectly) {
-          dbErrorMsg = rpcErr.message;
-        }
-
-        syncedToDatabase = updatedDirectly;
       }
 
+      if (cleanEmail) {
+        const { error: mailErr } = await supabase
+          .from('users')
+          .update(updatePayload)
+          .ilike('email', cleanEmail);
+        if (!mailErr) {
+          updatedDirectly = true;
+        } else if (!updatedDirectly) {
+          dbErrorMsg = mailErr.message;
+        }
+      }
+
+      syncedToDatabase = updatedDirectly;
+    }
+
+    if (hasAuthSession) {
       try {
         await supabase.auth.updateUser({
           data: { is_2fa_enabled: desired }

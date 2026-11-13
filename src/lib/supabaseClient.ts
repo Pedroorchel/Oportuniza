@@ -78,13 +78,20 @@ export function createEphemeralSupabaseClient() {
   );
 }
 
-// Helper to get the full base URL including subpath (e.g. /oportunizae/ on GitHub Pages)
+// Helper to get the full base URL including subpath (e.g. /Oportuniza/ on GitHub Pages)
 export function getAppRedirectUrl(): string {
   if (typeof window === 'undefined') return '';
-  const url = new URL(window.location.href);
-  url.search = '';
-  url.hash = '';
-  return url.toString();
+  const envBase = (import.meta.env?.BASE_URL || '/').trim();
+  let prefix = '';
+  if (envBase.startsWith('/') && envBase !== '/') {
+    prefix = envBase.replace(/\/+$/, '');
+  } else if (window.location.hostname.endsWith('github.io')) {
+    const segments = (window.location.pathname || '/').split('/').filter(Boolean);
+    if (segments.length > 0 && segments[0].toLowerCase() === 'oportuniza') {
+      prefix = `/${segments[0]}`;
+    }
+  }
+  return `${window.location.origin}${prefix}/`;
 }
 
 // Backward-compatibility helper

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Menu, User as UserIcon, Briefcase, GraduationCap, ChevronRight, Award, LogOut, CheckCircle, CheckCircle2, Lock, ShieldAlert, Sparkles, Bell, Search, MapPin, Play, BookOpen, Star, FileText, ArrowRight, ExternalLink, Headphones, X, Download, Phone, Mail, Building } from 'lucide-react';
 import { ScreenId, User, Job, Application, Course, Enrollment, UserCourseProgress } from './types';
 import { mockJobs, mockCourses, loadJobsFromSupabase, loadCoursesFromSupabase } from './data';
@@ -50,14 +50,25 @@ import {
 } from './lib/twoFactorSession';
 import { resolveStored2FAPref } from './lib/twoFactorSettingsService';
 import { sanitizeExternalUrl } from './lib/securityValidation';
+import {
+  getPublicScreens,
+  resolveScreenFromLocation,
+  syncUrlForScreen
+} from './lib/appRouter';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<ScreenId>('landing');
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>(() => resolveScreenFromLocation());
   const [history, setHistory] = useState<ScreenId[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin2FAVerified, setIsAdmin2FAVerified] = useState(false);
   const [isLogin2FAVerified, setIsLogin2FAVerified] = useState(false);
+  const shouldPushNextUrlRef = useRef(false);
+  const isHandlingPopStateRef = useRef(false);
+  const userRef = useRef<User | null>(null);
+  const currentScreenRef = useRef<ScreenId>(currentScreen);
+  userRef.current = user;
+  currentScreenRef.current = currentScreen;
   const handleWorkspaceUserUpdate = useCallback((updated: User | null) => {
     setUser(updated);
     if (updated && updated.is2FAEnabled === true) {
@@ -397,6 +408,60 @@ export default function App() {
     }
   };
 
+  // URL path synchronization (/login, /cadastro, /vagas, /cursos, etc.) + browser Back/Forward support
+  useEffect(() => {
+    if (isHandlingPopStateRef.current) {
+      isHandlingPopStateRef.current = false;
+      return;
+    }
+    const push = shouldPushNextUrlRef.current;
+    shouldPushNextUrlRef.current = false;
+    syncUrlForScreen(currentScreen, { replace: !push });
+  }, [currentScreen]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      let target = resolveScreenFromLocation();
+      const activeUser = userRef.current;
+      const publicScreens = getPublicScreens();
+
+      if (!activeUser && !publicScreens.includes(target)) {
+        target = 'login';
+      } else if (target === 'admin' && !activeUser?.isAdmin) {
+        target = activeUser ? 'home' : 'login';
+      } else if (target === 'atendimento') {
+        const tier = activeUser ? resolveUserHierarchyTier(activeUser) : null;
+        if (!tier || (tier.id !== 'admin_creator' && tier.id !== 'support_service')) {
+          target = activeUser ? 'home' : 'login';
+        }
+      }
+
+      isHandlingPopStateRef.current = true;
+      setCurrentScreen(target);
+      syncUrlForScreen(target, { replace: true });
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (isInitializing) return;
+    if (!user) {
+      if (!getPublicScreens().includes(currentScreen)) {
+        setCurrentScreen('login');
+      }
+      return;
+    }
+    if (currentScreen === 'details' && !detailJob && !detailCourse) {
+      setCurrentScreen('jobs');
+    } else if (currentScreen === 'course-player' && !detailCourse) {
+      setCurrentScreen('courses');
+    } else if (currentScreen === 'apply' && !detailJob) {
+      setCurrentScreen('jobs');
+    }
+  }, [isInitializing, user, currentScreen, detailJob, detailCourse]);
+
   useEffect(() => {
     if (user) {
       if (!user.isAdmin && user.status === 'pending') {
@@ -407,11 +472,11 @@ export default function App() {
       }
 
       const tier = resolveUserHierarchyTier(user);
-      if (user.isAdmin && ['landing', 'login', 'register', 'home'].includes(currentScreen)) {
+      if (user.isAdmin && ['landing', 'login', 'register', 'recover', 'home'].includes(currentScreen)) {
         setCurrentScreen('admin');
-      } else if (tier.id === 'support_service' && ['landing', 'login', 'register', 'home'].includes(currentScreen)) {
+      } else if (tier.id === 'support_service' && ['landing', 'login', 'register', 'recover', 'home'].includes(currentScreen)) {
         setCurrentScreen('atendimento');
-      } else if (['landing', 'login', 'register'].includes(currentScreen)) {
+      } else if (['landing', 'login', 'register', 'recover'].includes(currentScreen)) {
         setCurrentScreen('home');
       }
     }
@@ -524,10 +589,18 @@ export default function App() {
       }
 
       if (session) {
-        // Clean URL hash containing OAuth access_token after Supabase extracts it
-        if (typeof window !== 'undefined' && window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('error_description'))) {
+        // Clean URL hash containing OAuth access_token (or bare #) after Supabase extracts it
+        if (
+          typeof window !== 'undefined' &&
+          (window.location.href.endsWith('#') ||
+            (window.location.hash &&
+              (window.location.hash === '#' ||
+                window.location.hash.includes('access_token') ||
+                window.location.hash.includes('error_description'))))
+        ) {
           try {
             window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            syncUrlForScreen(currentScreenRef.current, { replace: true });
           } catch (e) {
             console.warn('Could not clean URL hash:', e);
           }
@@ -732,13 +805,13 @@ export default function App() {
               }
 
               const isAdminEmail = cleanEmail === 'oportunizahw@gmail.com';
-              const meta2FAPref = supabaseUser.user_metadata?.is_2fa_enabled;
               const local2FAPref = resolveStored2FAPref(cleanEmail);
+              const meta2FAPref = supabaseUser.user_metadata?.is_2fa_enabled;
               const initial2FAEnabled =
-                typeof meta2FAPref === 'boolean'
-                  ? meta2FAPref
-                  : typeof local2FAPref === 'boolean'
+                typeof local2FAPref === 'boolean'
                   ? local2FAPref
+                  : typeof meta2FAPref === 'boolean'
+                  ? meta2FAPref
                   : false;
               const isActivatedNew = Boolean(
                 isAdminEmail ||
@@ -1543,9 +1616,10 @@ export default function App() {
   };
 
   const handleScreenNavigation = (screen: ScreenId) => {
-    const publicScreens: ScreenId[] = ['landing', 'bio', 'privacy', 'terms', 'login', 'register'];
+    const publicScreens = getPublicScreens();
     if (!user && !publicScreens.includes(screen)) {
       toast.warning('Faça login para acessar esta área.');
+      shouldPushNextUrlRef.current = true;
       setCurrentScreen('login');
       return;
     }
@@ -1569,6 +1643,7 @@ export default function App() {
       }
       return [...prev, currentScreen];
     });
+    shouldPushNextUrlRef.current = true;
     setCurrentScreen(screen);
     if (screen === 'settings') setSettingsTabType('settings');
     // Clear unread count when reading messages
@@ -1578,6 +1653,7 @@ export default function App() {
   };
 
   const handleGoBack = (fallback: ScreenId = 'home') => {
+    shouldPushNextUrlRef.current = true;
     if (history.length > 0) {
       const prev = history[history.length - 1];
       setHistory((prevStack) => prevStack.slice(0, -1));
@@ -1672,6 +1748,7 @@ export default function App() {
             <AuthScreen 
               onNavigate={handleScreenNavigation}
               defaultIsLogin={currentScreen !== 'register'}
+              defaultIsRecover={currentScreen === 'recover'}
               onLoginSuccess={(loggedInUser) => {
                 const nextUser: User = {
                   ...loggedInUser,

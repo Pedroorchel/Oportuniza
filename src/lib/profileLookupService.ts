@@ -13,6 +13,52 @@ export function cleanEmailAddress(email?: string | null): string {
   return String(email || '').trim().toLowerCase();
 }
 
+const PREF_KEY_PREFIX = 'oportuniza-2fa-pref-';
+
+export function resolveStored2FAPref(email?: string | null): boolean | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const cleanEmail = cleanEmailAddress(email);
+  if (!cleanEmail) return undefined;
+  try {
+    const raw = window.localStorage.getItem(`${PREF_KEY_PREFIX}${cleanEmail}`);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+
+    const cachedRaw = window.localStorage.getItem('oportuniza-current-user');
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw);
+      if (parsed && cleanEmailAddress(parsed.email) === cleanEmail && typeof parsed.is2FAEnabled === 'boolean') {
+        return parsed.is2FAEnabled;
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return undefined;
+}
+
+export function persistLocal2FAPref(email: string | undefined | null, enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  const cleanEmail = cleanEmailAddress(email);
+  try {
+    if (cleanEmail) {
+      window.localStorage.setItem(`${PREF_KEY_PREFIX}${cleanEmail}`, String(Boolean(enabled)));
+    }
+    const cachedRaw = window.localStorage.getItem('oportuniza-current-user');
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw);
+      if (parsed && (!cleanEmail || cleanEmailAddress(parsed.email) === cleanEmail)) {
+        window.localStorage.setItem(
+          'oportuniza-current-user',
+          JSON.stringify({ ...parsed, is2FAEnabled: Boolean(enabled) })
+        );
+      }
+    }
+  } catch {
+    // Ignore storage write errors
+  }
+}
+
 export function extractDigits(value?: string | null): string {
   return String(value || '').replace(/\D/g, '');
 }
@@ -383,8 +429,11 @@ export function mapDatabaseRecordToAppUser(params: {
     : dbUser?.avatar_url || cachedUser?.avatarUrl || meta.avatar_url || '';
 
   const fallbackName = cleanEmail ? cleanEmail.split('@')[0] : 'Usuário';
+  const local2FAPref = resolveStored2FAPref(cleanEmail);
   const resolvedIs2FAEnabled =
-    typeof dbUser?.is_2fa_enabled === 'boolean'
+    typeof local2FAPref === 'boolean'
+      ? local2FAPref
+      : typeof dbUser?.is_2fa_enabled === 'boolean'
       ? dbUser.is_2fa_enabled
       : typeof dbUser?.is2FAEnabled === 'boolean'
       ? dbUser.is2FAEnabled
