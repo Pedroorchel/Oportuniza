@@ -109,7 +109,7 @@ export default function TwoFactorAuthScreen({
           delivered: true,
           message:
             result.message ||
-            `E-mail de verificação enviado via ${result.providerLabel || 'oportunizahw@gmail.com'} para ${user.email}. Confira sua caixa de entrada ou Spam.`
+            `E-mail de verificação enviado via ${result.providerLabel || 'Oportuniza Araucária'} para ${user.email}. Confira sua caixa de entrada ou Spam.`
         });
       } else {
         setTimer(0);

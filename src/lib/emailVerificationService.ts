@@ -338,13 +338,13 @@ export async function sendVerificationCodeEmail(
         ok: true,
         delivered: true,
         deliveryMethod: 'smtp',
-        providerLabel: 'oportunizahw@gmail.com',
+        providerLabel: 'Oportuniza Araucária',
         challengeId: typeof data.challengeId === 'string' ? data.challengeId : undefined,
         serverVerified: Boolean(data.serverVerified),
         expiresInSeconds: typeof data.expiresInSeconds === 'number' ? data.expiresInSeconds : 600,
         message:
           data.message ||
-          `Código de 8 dígitos enviado via oportunizahw@gmail.com para ${cleanEmail}.`
+          `Código de 8 dígitos enviado pelo Oportuniza Araucária para ${cleanEmail}.`
       };
     }
 

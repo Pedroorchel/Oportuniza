@@ -2,7 +2,7 @@
  * Organizational Hierarchy & Roles for Oportuniza Araucária
  * 
  * Strict 5-tier hierarchy defined by user specification:
- * 1. Admin Criador da Aplicação (Master / Plataforma / Pedro Orchel)
+ * 1. Admin Criador da Aplicação (Master / Plataforma)
  * 2. Atendimento Oportuniza (Suporte, moderação e atendimento municipal)
  * 3. Empresa (Empresas contratantes titulares com CNPJ)
  * 4. Usuários da Empresa Cadastrados (Recrutadores e membros de RH das empresas)
@@ -10,6 +10,7 @@
  */
 
 import { Crown, Headphones, Building2, Users, GraduationCap } from 'lucide-react';
+import { isProtectedAdminEmail } from './securityValidation';
 
 export type HierarchyTierKey = 
   | 'admin_creator' 
@@ -146,7 +147,7 @@ export function resolveUserHierarchyTier(user: any): HierarchyTier {
 
   // Tier 1: Admin Criador da Aplicação
   if (
-    emailLower === 'oportunizahw@gmail.com' ||
+    isProtectedAdminEmail(emailLower) ||
     roleLower.includes('criador') ||
     roleLower.includes('super admin') ||
     roleLower === 'admin criador da aplicação' ||

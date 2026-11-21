@@ -97,7 +97,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
           delivered: true,
           message:
             result.message ||
-            `E-mail enviado via ${result.providerLabel || 'oportunizahw@gmail.com'} para ${user.email}!`
+            `E-mail enviado via ${result.providerLabel || 'Oportuniza Araucária'} para ${user.email}!`
         });
       } else {
         setTimer(0);
@@ -400,7 +400,7 @@ export default function Admin2FAScreen({ user, onVerified, onCancel }: Admin2FAS
             <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-[11px] font-medium flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <span className="leading-relaxed">
-                {emailStatus.message || `E-mail de verificação enviado via oportunizahw@gmail.com para ${user.email}. Abra sua caixa de entrada para obter o código de 8 dígitos.`}
+                {emailStatus.message || `E-mail de verificação enviado pelo Oportuniza Araucária para ${user.email}. Abra sua caixa de entrada para obter o código de 8 dígitos.`}
               </span>
             </div>
           )}

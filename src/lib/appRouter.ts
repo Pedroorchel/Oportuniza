@@ -25,7 +25,7 @@ const SCREEN_TO_PATH: Record<ScreenId, string> = {
   'change-password': '/alterar-senha',
   privacy: '/privacidade',
   terms: '/termos',
-  admin: '/admin',
+  admin: '/painel',
   atendimento: '/atendimento',
 };
 
@@ -86,7 +86,6 @@ const PATH_TO_SCREEN: Record<string, ScreenId> = {
   '/privacy': 'privacy',
   '/termos': 'terms',
   '/terms': 'terms',
-  '/admin': 'admin',
   '/atendimento': 'atendimento',
 };
 

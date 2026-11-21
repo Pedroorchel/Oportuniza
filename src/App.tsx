@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { Menu, User as UserIcon, Briefcase, GraduationCap, ChevronRight, Award, LogOut, CheckCircle, CheckCircle2, Lock, ShieldAlert, Sparkles, Bell, Search, MapPin, Play, BookOpen, Star, FileText, ArrowRight, ExternalLink, Headphones, X, Download, Phone, Mail, Building } from 'lucide-react';
 import { ScreenId, User, Job, Application, Course, Enrollment, UserCourseProgress } from './types';
 import { mockJobs, mockCourses, loadJobsFromSupabase, loadCoursesFromSupabase } from './data';
@@ -20,8 +20,9 @@ import DetailsScreen from './components/DetailsScreen';
 import LandingScreen from './components/LandingScreen';
 import BioScreen from './components/BioScreen';
 import AuthScreen from './components/AuthScreen';
-import AdminPanelScreen from './components/AdminPanelScreen';
-import Admin2FAScreen from './components/Admin2FAScreen';
+const AdminPanelScreen = lazy(() => import('./components/AdminPanelScreen'));
+const Admin2FAScreen = lazy(() => import('./components/Admin2FAScreen'));
+const PortalGateOverlay = lazy(() => import('./components/PortalGateOverlay'));
 import TwoFactorAuthScreen from './components/TwoFactorAuthScreen';
 import CompanyDashboardScreen from './components/CompanyDashboardScreen';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -49,7 +50,7 @@ import {
   touchSession2FAActivity
 } from './lib/twoFactorSession';
 import { resolveStored2FAPref } from './lib/twoFactorSettingsService';
-import { sanitizeExternalUrl } from './lib/securityValidation';
+import { sanitizeExternalUrl, sanitizePostgrestFilterValue, isProtectedAdminEmail } from './lib/securityValidation';
 import {
   getPublicScreens,
   resolveScreenFromLocation,
@@ -63,6 +64,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin2FAVerified, setIsAdmin2FAVerified] = useState(false);
   const [isLogin2FAVerified, setIsLogin2FAVerified] = useState(false);
+  const [showHiddenPortalGate, setShowHiddenPortalGate] = useState(false);
   const shouldPushNextUrlRef = useRef(false);
   const isHandlingPopStateRef = useRef(false);
   const userRef = useRef<User | null>(null);
@@ -118,9 +120,12 @@ export default function App() {
     if (!user?.id || user.isAdmin) return;
 
     try {
-      const orFilters: string[] = [`user_id.eq.${user.id}`];
-      if (user.email) orFilters.push(`candidate_email.ilike.%${user.email.trim()}%`);
-      if (user.name) orFilters.push(`candidate_name.ilike.%${user.name.trim()}%`);
+      const safeUserId = sanitizePostgrestFilterValue(user.id);
+      const safeEmail = sanitizePostgrestFilterValue(user.email);
+      const safeName = sanitizePostgrestFilterValue(user.name);
+      const orFilters: string[] = [`user_id.eq.${safeUserId}`];
+      if (safeEmail) orFilters.push(`candidate_email.ilike.%${safeEmail}%`);
+      if (safeName) orFilters.push(`candidate_name.ilike.%${safeName}%`);
 
       const [compResult, enrResult, appsResult] = await Promise.all([
         supabase.from('user_course_progress').select('*').eq('user_id', user.id),
@@ -243,23 +248,23 @@ export default function App() {
     }
   }, [currentScreen, fetchUserData]);
 
-  // Keyboard shortcut listener: Ctrl + Shift + A to navigate to admin panel if user is admin
+  // Keyboard shortcut listener: Ctrl + Shift + Alt + A opens hidden admin access gate (or switches directly if already signed in as admin)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isKeyA = e.key === 'a' || e.key === 'A' || e.code === 'KeyA';
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && isKeyA) {
+      const isKeyA = e.code === 'KeyA' || e.key === 'a' || e.key === 'A';
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.altKey && isKeyA) {
+        e.preventDefault();
         const isUserAdmin = Boolean(
           user && (
             user.isAdmin ||
             user.role?.toLowerCase() === 'administrador' ||
             user.role?.toLowerCase() === 'admin' ||
             user.cargo?.toLowerCase() === 'administrador' ||
-            user.email?.toLowerCase() === 'oportunizahw@gmail.com'
+            isProtectedAdminEmail(user.email)
           )
         );
 
         if (isUserAdmin && user) {
-          e.preventDefault();
           const roleSig = buildSessionRoleSignature(user.role || 'Administrador', true);
           const requires2FAForAdmin = user.is2FAEnabled === true;
           const verified =
@@ -270,12 +275,15 @@ export default function App() {
             });
           setIsAdmin2FAVerified(verified);
           setUser(prev => (prev ? { ...prev, isAdmin: true } : prev));
+          setShowHiddenPortalGate(false);
           setCurrentScreen('admin');
           toast.info(
             verified
-              ? 'Acessando painel de administração...'
-              : 'Confirme o código 2FA para acessar o Painel Administrativo.'
+              ? 'Acessando painel...'
+              : 'Confirme o código 2FA para continuar.'
           );
+        } else {
+          setShowHiddenPortalGate(prev => !prev);
         }
       }
     };
@@ -804,7 +812,7 @@ export default function App() {
                 return;
               }
 
-              const isAdminEmail = cleanEmail === 'oportunizahw@gmail.com';
+              const isAdminEmail = isProtectedAdminEmail(cleanEmail);
               const local2FAPref = resolveStored2FAPref(cleanEmail);
               const meta2FAPref = supabaseUser.user_metadata?.is_2fa_enabled;
               const initial2FAEnabled =
@@ -1024,6 +1032,7 @@ export default function App() {
       clearSession2FAVerification();
       sessionStorage.removeItem('oportuniza-reg-in-progress');
       sessionStorage.removeItem('oportuniza-recovery-in-progress');
+      sessionStorage.removeItem('oportuniza-admin-gate-token');
       localStorage.removeItem('oportuniza-current-user');
       localStorage.removeItem('oportuniza-applications');
       localStorage.removeItem('oportuniza-enrollments');
@@ -1052,6 +1061,7 @@ export default function App() {
     setHistory([]);
     setIsAdmin2FAVerified(false);
     setIsLogin2FAVerified(false);
+    setShowHiddenPortalGate(false);
     setCurrentScreen('landing');
 
     // 3. Sign out from Supabase Auth cleanly without blocking the UI
@@ -1675,7 +1685,7 @@ export default function App() {
   const requiresAdmin2FA = Boolean(
     user &&
       !isPendingVerification &&
-      (isAdminSession || currentScreen === 'admin') &&
+      isAdminSession &&
       user.is2FAEnabled === true &&
       !isAdmin2FAVerified
   );
@@ -1778,23 +1788,6 @@ export default function App() {
                   setCurrentScreen('home');
                 }
               }}
-              onAdminLoginSuccess={(adminUser) => {
-                const nextAdminUser: User = {
-                  ...adminUser,
-                  is2FAEnabled: Boolean(adminUser.is2FAEnabled)
-                };
-                const requires2FA = nextAdminUser.is2FAEnabled === true;
-                const verifiedNow =
-                  !requires2FA ||
-                  isSession2FAVerified(nextAdminUser.id, nextAdminUser.email, {
-                    isPrivileged: true,
-                    expectedRoleSignature: buildSessionRoleSignature(nextAdminUser.role || 'Administrador', true)
-                  });
-                setIsLogin2FAVerified(verifiedNow);
-                setIsAdmin2FAVerified(verifiedNow);
-                setUser(nextAdminUser);
-                setCurrentScreen('admin');
-              }}
             />
           )}
 
@@ -1851,23 +1844,60 @@ export default function App() {
             </ErrorBoundary>
           )}
 
-          {/* Admin Panel (Guarded by 2FA when enabled by account owner) */}
-          {user && !isPendingVerification && (isAdminSession || currentScreen === 'admin') && !isPublicScreen && (
+          {/* Admin Panel (Lazy-loaded only for authenticated admin sessions) */}
+          {user && !isPendingVerification && isAdminSession && !isPublicScreen && (
             <ErrorBoundary fallbackTitle="Erro ao carregar o Painel Administrativo">
-              {requiresAdmin2FA ? (
-                <Admin2FAScreen
-                  user={user}
-                  onVerified={() => setIsAdmin2FAVerified(true)}
-                  onCancel={handleSignOut}
-                />
-              ) : (
-                <AdminPanelScreen 
-                  user={user}
-                  onLogout={handleSignOut}
-                  onUpdateUser={handleWorkspaceUserUpdate}
-                />
-              )}
+              <Suspense
+                fallback={
+                  <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-300 text-xs font-bold uppercase tracking-widest">
+                    Carregando...
+                  </div>
+                }
+              >
+                {requiresAdmin2FA ? (
+                  <Admin2FAScreen
+                    user={user}
+                    onVerified={() => setIsAdmin2FAVerified(true)}
+                    onCancel={handleSignOut}
+                  />
+                ) : (
+                  <AdminPanelScreen 
+                    user={user}
+                    onLogout={handleSignOut}
+                    onUpdateUser={handleWorkspaceUserUpdate}
+                  />
+                )}
+              </Suspense>
             </ErrorBoundary>
+          )}
+
+          {/* Hidden Restricted Portal Gate (lazy-loaded ONLY via Ctrl + Shift + Alt + A) */}
+          {showHiddenPortalGate && (
+            <Suspense fallback={null}>
+              <PortalGateOverlay
+                onClose={() => setShowHiddenPortalGate(false)}
+                onAuthenticated={(authenticatedAdmin) => {
+                  const nextAdminUser: User = {
+                    ...authenticatedAdmin,
+                    status: 'active',
+                    isAdmin: true,
+                    is2FAEnabled: Boolean(authenticatedAdmin.is2FAEnabled)
+                  };
+                  const requires2FA = nextAdminUser.is2FAEnabled === true;
+                  const verifiedNow =
+                    !requires2FA ||
+                    isSession2FAVerified(nextAdminUser.id, nextAdminUser.email, {
+                      isPrivileged: true,
+                      expectedRoleSignature: buildSessionRoleSignature(nextAdminUser.role || 'Administrador', true)
+                    });
+                  setIsLogin2FAVerified(verifiedNow);
+                  setIsAdmin2FAVerified(verifiedNow);
+                  setShowHiddenPortalGate(false);
+                  setUser(nextAdminUser);
+                  setCurrentScreen('admin');
+                }}
+              />
+            </Suspense>
           )}
 
           {/* Company Dashboard (Exclusive Company / RH Workspace) */}

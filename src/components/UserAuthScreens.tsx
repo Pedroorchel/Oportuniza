@@ -1069,7 +1069,7 @@ export default function UserAuthScreens({
                 <div>
                   <h4 className="text-[11px] font-bold text-slate-800 dark:text-slate-200">Abra o e-mail recebido</h4>
                   <p className="text-[10px] text-gray-500 dark:text-slate-400 mt-0.5 leading-snug">
-                    Procure a mensagem do <strong className="text-slate-700 dark:text-slate-300">Oportuniza Araucária (oportunizahw@gmail.com)</strong>.
+                    Procure a mensagem do <strong className="text-slate-700 dark:text-slate-300">Oportuniza Araucária</strong>.
                   </p>
                 </div>
               </div>
@@ -1156,15 +1156,6 @@ export default function UserAuthScreens({
             </button>
           </form>
         )}
-      </div>
-
-      {/* Visual notice */}
-      <div className="mt-8 text-center px-4 max-w-md mx-auto">
-        <p className="text-[10px] text-gray-400 dark:text-slate-500 leading-normal">
-          Dica rápida: Para fins de teste e demonstração rápida de banca, use o login padrão pré-cadastrado abaixo:
-          <br />
-          <strong className="text-primary dark:text-[#52B4D8] font-mono select-all">oportunizahw@gmail.com</strong> com senha <strong className="text-primary dark:text-[#52B4D8] font-mono select-all">123</strong>
-        </p>
       </div>
 
       {/* MODAL LGPD */}

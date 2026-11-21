@@ -26,8 +26,8 @@ const INITIAL_AUDIT_LOGS: AuditLogEntry[] = [
   {
     id: 'audit-001',
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(),
-    actor_name: 'Pedro Henrique Orchel',
-    actor_email: 'oportunizahw@gmail.com',
+    actor_name: 'Admin Principal',
+    actor_email: 'sistema@oportunizaehw.com.br',
     actor_role: 'Admin Criador da Aplicação',
     action: 'Inicialização da Plataforma & Diretrizes LGPD',
     target_name: 'Sistema Oportuniza Araucária',
@@ -39,8 +39,8 @@ const INITIAL_AUDIT_LOGS: AuditLogEntry[] = [
   {
     id: 'audit-002',
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-    actor_name: 'Pedro Henrique Orchel',
-    actor_email: 'oportunizahw@gmail.com',
+    actor_name: 'Admin Principal',
+    actor_email: 'sistema@oportunizaehw.com.br',
     actor_role: 'Admin Criador da Aplicação',
     action: 'Homologação de Empresa Titular',
     target_name: 'Supermassa Alimentos Araucária',

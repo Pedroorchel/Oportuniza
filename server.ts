@@ -11,38 +11,162 @@ dotenv.config();
 
 const app = express();
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
 const PORT = Number(process.env.PORT || 3000);
 
-// Global security headers (keeps iframe compatibility for AI Studio preview)
-app.use((_req: any, res: any, next: any) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), payment=(), usb=()");
-  res.setHeader("X-DNS-Prefetch-Control", "off");
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+const entryScriptAtBoot = process.argv[1] || '';
+const isCompiledBoot =
+  (typeof __filename === 'string' && (__filename.endsWith('server.cjs') || __filename.endsWith('server.js'))) ||
+  entryScriptAtBoot.endsWith('server.cjs') ||
+  entryScriptAtBoot.endsWith('server.js');
+const isProdSecurityMode =
+  (process.env.NODE_ENV === "production" || isCompiledBoot) &&
+  fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
+
+const PRODUCTION_CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self' https://*.supabase.co https://accounts.google.com",
+  "frame-ancestors 'self' https://aistudio.google.com https://*.google.com",
+  "script-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.googleapis.com https://accounts.google.com https://nominatim.openstreetmap.org https://viacep.com.br",
+  "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://accounts.google.com https://*.supabase.co",
+  "media-src 'self' blob: https:",
+  "worker-src 'self' blob:"
+].join("; ");
+
+const BLOCKED_PROBE_PATTERNS = [
+  /^\/\.env(?:\.|$)/i,
+  /^\/\.git(?:\/|$)/i,
+  /^\/\.aws(?:\/|$)/i,
+  /^\/\.htaccess$/i,
+  /^\/\.ds_store$/i,
+  /^\/wp-admin(?:\/|$)/i,
+  /^\/wp-login\.php$/i,
+  /^\/wp-content(?:\/|$)/i,
+  /^\/xmlrpc\.php$/i,
+  /^\/phpmyadmin(?:\/|$)/i,
+  /^\/actuator(?:\/|$)/i,
+  /^\/cgi-bin(?:\/|$)/i,
+  /^\/server-status$/i
+];
+
+function stripPrototypePollution(value: any, depth = 0): any {
+  if (depth > 10 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => stripPrototypePollution(item, depth + 1));
+  }
+  const clean: Record<string, any> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    clean[k] = stripPrototypePollution(v, depth + 1);
+  }
+  return clean;
+}
+
+function isAllowedCorsOrigin(origin?: string): boolean {
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== 'https:' && protocol !== 'http:') return false;
+
+    if (
+      host === 'oportunizaehw.com.br' ||
+      host === 'www.oportunizaehw.com.br' ||
+      host.endsWith('.oportunizaehw.com.br') ||
+      host === 'pedroorchel.github.io' ||
+      host.endsWith('.run.app') ||
+      host === 'localhost' ||
+      host === '127.0.0.1'
+    ) {
+      return true;
+    }
+
+    const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    return extraOrigins.includes(origin.toLowerCase()) || extraOrigins.includes(host);
+  } catch {
+    return false;
+  }
+}
+
+// Block vulnerability scanners, oversized URLs, null bytes & path traversal early
+app.use((req: any, res: any, next: any) => {
+  const rawUrl = String(req.originalUrl || req.url || '');
+  if (rawUrl.length > 2048 || rawUrl.includes('\0') || rawUrl.toLowerCase().includes('%00')) {
+    return res.status(400).json({ error: "Requisição inválida." });
+  }
+  const reqPath = String(req.path || '/');
+  if (BLOCKED_PROBE_PATTERNS.some((re) => re.test(reqPath))) {
+    return res.status(404).end();
+  }
   next();
 });
 
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+// Global security headers (keeps iframe compatibility for preview while enforcing strong hardening)
+app.use((req: any, res: any, next: any) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self), payment=(), usb=(), magnetometer=(), gyroscope=()");
+  res.setHeader("X-DNS-Prefetch-Control", "off");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+  res.setHeader("Origin-Agent-Cluster", "?1");
 
-// CORS support for /api/* routes (allows external static frontend via VITE_API_BASE_URL)
+  const forwardedProto = String(req.headers?.['x-forwarded-proto'] || '').toLowerCase();
+  if (req.secure || forwardedProto.includes('https')) {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  if (isProdSecurityMode && !req.path.startsWith('/api/')) {
+    res.setHeader("Content-Security-Policy", PRODUCTION_CSP);
+  }
+  next();
+});
+
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Restricted CORS allowlist + prototype pollution sanitizer + no-store for /api/* routes
 app.use("/api", (req: any, res: any, next: any) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, apikey");
+  const origin = typeof req.headers?.origin === 'string' ? req.headers.origin.trim() : '';
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+
+  if (origin) {
+    if (!isAllowedCorsOrigin(origin)) {
+      return res.status(403).json({ error: "Origem não autorizada pela política de segurança." });
+    }
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, apikey, x-client-info, prefer, range");
   if (req.method === "OPTIONS") {
     return res.status(204).end();
+  }
+
+  if (req.body && typeof req.body === 'object') {
+    req.body = stripPrototypePollution(req.body);
+  }
+  if (req.query && typeof req.query === 'object') {
+    req.query = stripPrototypePollution(req.query);
   }
   next();
 });
 
 function getClientIp(req: any): string {
-  const xff = req.headers?.['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.trim()) {
-    return xff.split(',')[0].trim();
-  }
-  return req.socket?.remoteAddress || req.ip || 'unknown';
+  const rawIp = String(req.ip || req.socket?.remoteAddress || 'unknown').trim();
+  return rawIp.replace(/^::ffff:/i, '') || 'unknown';
 }
 
 interface RateBucket {
@@ -87,6 +211,13 @@ function createRateLimiter(options: {
   };
 }
 
+const globalApiRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 240,
+  message: "Muitas requisições em sequência."
+});
+app.use("/api", globalApiRateLimit);
+
 const mailRateLimitByIp = createRateLimiter({
   windowMs: 2 * 60 * 1000,
   max: 8,
@@ -111,8 +242,8 @@ const verifyRateLimit = createRateLimiter({
 
 const adminAuthRateLimit = createRateLimiter({
   windowMs: 10 * 60 * 1000,
-  max: 6,
-  message: "Muitas tentativas inválidas de acesso administrativo."
+  max: 30,
+  message: "Muitas tentativas de acesso administrativo."
 });
 
 const passwordUpdateRateLimit = createRateLimiter({
@@ -436,9 +567,19 @@ async function generateContentWithRetry(
 
 // Supabase Proxy to prevent CORS/Failed to fetch errors in browser iframe
 app.all("/api/supabase-proxy", proxyRateLimit, async (req: any, res: any) => {
+  const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']);
+  if (!allowedMethods.has(String(req.method || '').toUpperCase())) {
+    return res.status(405).json({ error: "Method Not Allowed" });
+  }
+
   const targetUrl = req.query.url as string;
-  if (!targetUrl) {
-    return res.status(400).json({ error: "Missing Target URL" });
+  if (!targetUrl || typeof targetUrl !== 'string' || targetUrl.length > 2000) {
+    return res.status(400).json({ error: "Missing or invalid Target URL" });
+  }
+
+  const rawLower = targetUrl.toLowerCase();
+  if (rawLower.includes('..') || rawLower.includes('%2e') || rawLower.includes('\\') || rawLower.includes('\0')) {
+    return res.status(403).json({ error: "Forbidden Target Path" });
   }
 
   const defaultSupabaseUrl = "https://ckzygdwhihybrdzctdup.supabase.co";
@@ -448,7 +589,13 @@ app.all("/api/supabase-proxy", proxyRateLimit, async (req: any, res: any) => {
 
   try {
     const parsedTarget = new URL(targetUrl);
-    if (parsedTarget.protocol !== 'https:' || parsedTarget.host !== allowedHost) {
+    if (
+      parsedTarget.protocol !== 'https:' ||
+      parsedTarget.host !== allowedHost ||
+      parsedTarget.port !== '' ||
+      parsedTarget.username !== '' ||
+      parsedTarget.password !== ''
+    ) {
       return res.status(403).json({ error: "Forbidden Target Domain" });
     }
     if (!allowedPathPrefixes.some((prefix) => parsedTarget.pathname.startsWith(prefix))) {
@@ -731,29 +878,218 @@ function buildOportunizaEmailHtml(params: {
 </html>`;
 }
 
-// Endpoint to verify Admin credentials safely on server (rate-limited, timing-safe)
-app.post("/api/admin-verify", adminAuthRateLimit, (req: any, res: any) => {
-  const cleanEmail = String(req.body?.email || 'oportunizahw@gmail.com').trim().toLowerCase();
-  const candidate = String(req.body?.password || '');
+const adminLockoutMap = new Map<string, { failures: number; lockedUntil: number }>();
+const ADMIN_GATE_TOKEN_SECRET =
+  (process.env.ADMIN_SESSION_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
+const ADMIN_GATE_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 
-  if (cleanEmail !== 'oportunizahw@gmail.com' || !candidate) {
-    return res.status(401).json({ ok: false, error: "Credenciais administrativas inválidas." });
+function createAdminGateToken(email: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub: email.trim().toLowerCase(),
+      role: 'admin',
+      exp: Date.now() + ADMIN_GATE_TOKEN_TTL_MS
+    }),
+    'utf8'
+  ).toString('base64url');
+  const sig = crypto.createHmac('sha256', ADMIN_GATE_TOKEN_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifyAdminGateToken(token: string): { valid: boolean; email?: string } {
+  if (!token || !token.includes('.')) return { valid: false };
+  const parts = token.split('.');
+  if (parts.length !== 2) return { valid: false };
+  const [payload, sig] = parts;
+  if (!payload || !sig) return { valid: false };
+  const expectedSig = crypto
+    .createHmac('sha256', ADMIN_GATE_TOKEN_SECRET)
+    .update(payload)
+    .digest('base64url');
+  if (!timingSafeHexEqual(sig, expectedSig)) return { valid: false };
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!decoded || decoded.role !== 'admin' || typeof decoded.exp !== 'number' || Date.now() > decoded.exp) {
+      return { valid: false };
+    }
+    return { valid: true, email: String(decoded.sub || '') };
+  } catch {
+    return { valid: false };
+  }
+}
+
+// Endpoint to verify Admin credentials safely on server (rate-limited, progressive lockout, timing-safe)
+app.post("/api/admin-verify", adminAuthRateLimit, async (req: any, res: any) => {
+  const clientIp = getClientIp(req);
+  const now = Date.now();
+  const lockEntry = adminLockoutMap.get(clientIp);
+  if (lockEntry && lockEntry.lockedUntil > now) {
+    const waitSec = Math.max(1, Math.ceil((lockEntry.lockedUntil - now) / 1000));
+    res.setHeader("Retry-After", String(waitSec));
+    return res.status(429).json({
+      ok: false,
+      error: `Acesso administrativo bloqueado temporariamente por segurança. Aguarde ${waitSec}s.`
+    });
+  }
+
+  const adminEmail = (process.env.ADMIN_EMAIL || 'oportunizahw@gmail.com').trim().toLowerCase();
+  const isShortcutGate = req.body?.gateMode === 'shortcut';
+  const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
+  const rawCandidate = String(req.body?.password || '');
+  const candidate = rawCandidate.trim();
+
+  if ((!isShortcutGate && (!cleanEmail || cleanEmail !== adminEmail)) || !candidate || candidate.length > 200) {
+    const nextFailures = (lockEntry?.failures || 0) + 1;
+    const lockedUntil = nextFailures >= 5 ? Date.now() + 15 * 60 * 1000 : 0;
+    adminLockoutMap.set(clientIp, { failures: nextFailures, lockedUntil });
+    await new Promise((r) => setTimeout(r, 180));
+    return res.status(401).json({
+      ok: false,
+      error: isShortcutGate ? "Código de acesso inválido." : "E-mail ou senha incorretos."
+    });
   }
 
   const configuredCode = process.env.ADMIN_ACCESS_CODE?.trim();
   let valid = false;
   if (configuredCode) {
-    valid = timingSafeHexEqual(sha256Hex(candidate), sha256Hex(configuredCode));
+    valid =
+      timingSafeHexEqual(sha256Hex(candidate), sha256Hex(configuredCode)) ||
+      timingSafeHexEqual(sha256Hex(rawCandidate), sha256Hex(configuredCode));
   } else {
-    const computed = sha256Hex(`${ADMIN_FALLBACK_SALT}:${candidate}`);
-    valid = timingSafeHexEqual(computed, ADMIN_FALLBACK_SHA256);
+    const computedTrimmed = sha256Hex(`${ADMIN_FALLBACK_SALT}:${candidate}`);
+    const computedRaw = sha256Hex(`${ADMIN_FALLBACK_SALT}:${rawCandidate}`);
+    valid =
+      timingSafeHexEqual(computedTrimmed, ADMIN_FALLBACK_SHA256) ||
+      timingSafeHexEqual(computedRaw, ADMIN_FALLBACK_SHA256);
+  }
+
+  let resolvedProfile: Record<string, any> = {
+    id: '00000000-0000-4000-8000-000000000604',
+    name: 'Administrador',
+    email: adminEmail,
+    avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
+    isAdmin: true,
+    role: 'Administrador',
+    cargo: 'Administrador'
+  };
+
+  if (!valid) {
+    try {
+      const defaultSupabaseUrl = "https://ckzygdwhihybrdzctdup.supabase.co";
+      const rawUrl = process.env.VITE_SUPABASE_URL || defaultSupabaseUrl;
+      const supabaseUrl = rawUrl.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '').trim();
+      const supabaseKey =
+        (process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QHYzyrfocbKo60XS5EFYBA_Js8u-l0O").trim();
+      const sb = createClient(supabaseUrl, supabaseKey, {
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { data: authData, error: authErr } = await sb.auth.signInWithPassword({
+        email: adminEmail,
+        password: candidate
+      });
+
+      if (!authErr && authData?.user) {
+        valid = true;
+        resolvedProfile.id = authData.user.id || resolvedProfile.id;
+        resolvedProfile.email = (authData.user.email || adminEmail).trim().toLowerCase();
+        if (authData.user.user_metadata?.name) {
+          resolvedProfile.name = String(authData.user.user_metadata.name);
+        }
+        if (typeof authData.user.user_metadata?.is_2fa_enabled === 'boolean') {
+          resolvedProfile.is2FAEnabled = authData.user.user_metadata.is_2fa_enabled;
+        }
+        if (authData.session?.access_token) {
+          const authedSb = createClient(supabaseUrl, supabaseKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+            global: { headers: { Authorization: `Bearer ${authData.session.access_token}` } }
+          });
+          const { data: row } = await authedSb
+            .from('users')
+            .select('id, name, avatar_url, is_2fa_enabled')
+            .eq('id', authData.user.id)
+            .maybeSingle();
+          if (row) {
+            if (row.name) resolvedProfile.name = String(row.name);
+            if (row.avatar_url) resolvedProfile.avatarUrl = String(row.avatar_url);
+            if (typeof row.is_2fa_enabled === 'boolean') {
+              resolvedProfile.is2FAEnabled = row.is_2fa_enabled;
+            }
+          }
+        }
+      }
+    } catch (authLookupErr) {
+      console.warn('Admin Supabase fallback auth check error:', authLookupErr);
+    }
   }
 
   if (!valid) {
-    return res.status(401).json({ ok: false, error: "E-mail ou senha do administrador incorretos." });
+    const nextFailures = (lockEntry?.failures || 0) + 1;
+    const lockedUntil = nextFailures >= 5 ? Date.now() + 15 * 60 * 1000 : 0;
+    adminLockoutMap.set(clientIp, { failures: nextFailures, lockedUntil });
+    if (nextFailures >= 5) {
+      console.warn(`[SECURITY] Admin brute-force lockout triggered for IP ${clientIp}`);
+    }
+    await new Promise((r) => setTimeout(r, 180));
+    return res.status(401).json({
+      ok: false,
+      error: isShortcutGate ? "Código de acesso inválido." : "E-mail ou senha incorretos."
+    });
   }
 
-  return res.json({ ok: true });
+  adminLockoutMap.delete(clientIp);
+  const adminToken = createAdminGateToken(String(resolvedProfile.email || adminEmail));
+  return res.json({
+    ok: true,
+    isAdmin: true,
+    adminToken,
+    profile: resolvedProfile
+  });
+});
+
+// Optional server-side admin data loader when SUPABASE_SERVICE_ROLE_KEY is configured
+app.get("/api/admin-data", adminAuthRateLimit, async (req: any, res: any) => {
+  const authHeader = String(req.headers?.authorization || '');
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+  const verified = verifyAdminGateToken(bearerToken);
+  if (!verified.valid) {
+    return res.status(401).json({ ok: false, error: "Token administrativo inválido ou expirado." });
+  }
+
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!serviceRoleKey) {
+    return res.json({
+      ok: true,
+      hasServiceRole: false,
+      requiresSupabaseSession: true
+    });
+  }
+
+  try {
+    const defaultSupabaseUrl = "https://ckzygdwhihybrdzctdup.supabase.co";
+    const rawUrl = process.env.VITE_SUPABASE_URL || defaultSupabaseUrl;
+    const supabaseUrl = rawUrl.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '').trim();
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+
+    const [usersRes, appsRes, enrollRes] = await Promise.all([
+      adminClient.from('users').select('*'),
+      adminClient.from('applications').select('*'),
+      adminClient.from('enrollments').select('*')
+    ]);
+
+    return res.json({
+      ok: true,
+      hasServiceRole: true,
+      requiresSupabaseSession: false,
+      users: Array.isArray(usersRes.data) ? usersRes.data : [],
+      applications: Array.isArray(appsRes.data) ? appsRes.data : [],
+      enrollments: Array.isArray(enrollRes.data) ? enrollRes.data : []
+    });
+  } catch (err: any) {
+    console.error("Error in /api/admin-data:", err);
+    return res.status(500).json({ ok: false, error: err?.message || "Erro ao consultar dados administrativos." });
+  }
 });
 
 // Endpoint to verify server-generated 8-digit OTP codes (2FA, registration, recovery)

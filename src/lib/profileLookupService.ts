@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { User } from '../types';
+import { isProtectedAdminEmail } from './securityValidation';
 
 export interface ProfileBundleResult {
   dbUser: Record<string, any> | null;
@@ -133,7 +134,7 @@ export function resolveIsAccountActivated(params: {
       dbUser?.isAdmin ||
       roleLower === 'administrador' ||
       roleLower === 'admin' ||
-      cleanEmail === 'oportunizahw@gmail.com'
+      isProtectedAdminEmail(cleanEmail)
   );
   if (isAdminUser) return true;
 
@@ -388,7 +389,7 @@ export function mapDatabaseRecordToAppUser(params: {
       dbUser?.isAdmin ||
       dbUser?.role === 'Administrador' ||
       dbUser?.cargo === 'Administrador' ||
-      cleanEmail === 'oportunizahw@gmail.com'
+      isProtectedAdminEmail(cleanEmail)
   );
 
   const explicitType = String(

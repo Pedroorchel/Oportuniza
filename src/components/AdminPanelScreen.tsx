@@ -7,13 +7,14 @@ import {
   Mail, Phone, Smartphone, ClipboardCheck, ArrowUpRight, CheckCircle2, UserCheck,
   Menu, X, Eye, EyeOff, Shield, ShieldCheck, Tag, Sparkles, ChevronDown, UserCog,
   Lock, Unlock, Ban, AlertTriangle, UserX, Building2, Crown, Headphones, History,
-  MessageSquare, User as UserIcon, Printer
+  MessageSquare, User as UserIcon, Printer, RefreshCw
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { motion, AnimatePresence } from 'motion/react';
 import { Job, Course, Application, User, Enrollment } from '../types';
 import { mockJobs, mockCourses, saveAdminJobs, saveAdminCourses, deleteJobPermanently } from '../data';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, getAppRedirectUrl } from '../lib/supabaseClient';
+import { buildApiEndpoint } from '../lib/emailVerificationService';
 import { 
   blockUserAccount, 
   unblockUserAccount, 
@@ -24,7 +25,7 @@ import {
 } from '../lib/blockedAccounts';
 import { HIERARCHY_TIERS, HIERARCHY_LIST, resolveUserHierarchyTier, HierarchyTierKey } from '../lib/hierarchyRoles';
 import { AuditLogEntry, fetchAllAuditLogs, recordAuditLog } from '../lib/auditLogService';
-import { sanitizeExternalUrl } from '../lib/securityValidation';
+import { sanitizeExternalUrl, isProtectedAdminEmail } from '../lib/securityValidation';
 import { updateOwn2FASetting } from '../lib/twoFactorSettingsService';
 import { toast } from '../lib/toast';
 
@@ -133,6 +134,17 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Supabase Auth RLS Session Unlock state (when opened via Ctrl+Shift+Alt+A shortcut without Supabase JWT)
+  const [needsSupabaseSession, setNeedsSupabaseSession] = useState(false);
+  const [supabaseSessionReason, setSupabaseSessionReason] = useState<'no-session' | 'non-admin-session' | null>(null);
+  const [activeSupabaseEmail, setActiveSupabaseEmail] = useState<string | null>(null);
+  const [unlockEmail, setUnlockEmail] = useState('');
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [showUnlockPassword, setShowUnlockPassword] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [showPasswordUnlockForm, setShowPasswordUnlockForm] = useState(false);
+
   // Search queries
   const [jobsSearch, setJobsSearch] = useState('');
   const [coursesSearch, setCoursesSearch] = useState('');
@@ -177,10 +189,128 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
     };
   }, []);
 
+  const mapRawApplications = (rows: any[]): Application[] =>
+    rows.map(item => {
+      let cName = String(item.candidate_name || (item.user_id ? String(item.user_id).substring(0, 8) : '') || 'Candidato');
+      let cEmail = item.candidate_email ? String(item.candidate_email) : '';
+      let cPhone = item.candidate_phone ? String(item.candidate_phone) : '';
+      if (typeof cName === 'string' && cName.includes('|')) {
+        const parts = cName.split('|');
+        cName = parts[0].trim();
+        if (parts.length > 1 && !cEmail) cEmail = parts[1].trim();
+        if (parts.length > 2 && !cPhone) cPhone = parts[2].trim();
+      }
+
+      return {
+        id: String(item.id ?? `app-${Math.random()}`),
+        jobId: String(item.job_id || ''),
+        jobTitle: String(item.job_title || 'Vaga'),
+        company: String(item.company || 'Empresa'),
+        appliedDate: String(item.created_at || item.applied_date || new Date().toISOString()),
+        status: item.status || 'Em análise',
+        candidateName: cName,
+        cvLink: item.cv_link ? String(item.cv_link) : undefined,
+        cvFileName: item.cv_file_name ? String(item.cv_file_name) : undefined,
+        candidateEmail: cEmail || undefined,
+        candidatePhone: cPhone || undefined
+      };
+    });
+
+  const mapRawEnrollments = (rows: any[]): Enrollment[] =>
+    rows.map(item => ({
+      id: String(item.id ?? `enr-${Math.random()}`),
+      courseId: String(item.course_id || ''),
+      courseTitle: String(item.course_title || 'Curso'),
+      instructor: String(item.instructor || 'Instrutor'),
+      enrolledDate: String(item.enrolled_date || item.created_at || ''),
+      status: item.status || 'Em andamento',
+      progress: Number(item.progress) || 0,
+      userName: String(item.user_name || (item.user_id ? String(item.user_id).substring(0, 8) : '') || 'Aluno')
+    }));
+
+  const mapRawUsers = (rows: any[]): User[] => {
+    const localEmails = getLocalBlockedEmails();
+    const localIds = getLocalBlockedIds();
+
+    return rows.map(u => {
+      const emailLower = String(u.email || '').trim().toLowerCase();
+      const idStr = String(u.id || '').trim();
+      const isAdm = Boolean(
+        u.is_admin ||
+        u.isAdmin ||
+        u.role === 'Administrador' ||
+        u.cargo === 'Administrador' ||
+        isProtectedAdminEmail(emailLower)
+      );
+      const isBlocked = Boolean(
+        isUserRecordBlocked(u) ||
+        (emailLower && localEmails.includes(emailLower)) ||
+        (idStr && localIds.includes(idStr))
+      );
+      const userRole = isBlocked ? 'BLOQUEADO' : String(u.role || u.cargo || (isAdm ? 'Administrador' : 'Estudante'));
+
+      let resolvedReason = u.block_reason || u.blockReason || '';
+      if (!resolvedReason && typeof u.bio === 'string' && u.bio.includes('[[ACCOUNT_BLOCKED]]:')) {
+        resolvedReason = u.bio.replace('[[ACCOUNT_BLOCKED]]:', '').trim();
+      }
+      if (!resolvedReason && isBlocked) {
+        resolvedReason = getAccountBlockReason({ id: idStr, email: emailLower });
+      }
+
+      return {
+        ...u,
+        id: idStr,
+        name: String(u.name || u.email || 'Usuário'),
+        email: String(u.email || ''),
+        isAdmin: isAdm && !isBlocked,
+        isBlocked: isBlocked,
+        blockReason: isBlocked ? resolvedReason : undefined,
+        status: isBlocked ? 'blocked' : (u.status || 'active'),
+        role: userRole,
+        cargo: userRole
+      };
+    }) as User[];
+  };
+
+  const tryFetchAdminDataViaServer = async (): Promise<boolean> => {
+    try {
+      const gateToken =
+        typeof window !== 'undefined' ? sessionStorage.getItem('oportuniza-admin-gate-token') : null;
+      if (!gateToken) return false;
+
+      const res = await fetch(buildApiEndpoint('/api/admin-data'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${gateToken}` }
+      });
+      if (!res.ok) return false;
+      const json: any = await res.json().catch(() => null);
+      if (!json?.ok || !json?.hasServiceRole) return false;
+
+      if (Array.isArray(json.users)) setUserList(mapRawUsers(json.users));
+      if (Array.isArray(json.applications)) setApplications(mapRawApplications(json.applications));
+      if (Array.isArray(json.enrollments)) setEnrollmentsList(mapRawEnrollments(json.enrollments));
+      setNeedsSupabaseSession(false);
+      setSupabaseSessionReason(null);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   // Fetch all applications across all users from Supabase for real administration
   const fetchAllApplications = async () => {
     try {
       setLoading(true);
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session?.user) {
+        const loaded = await tryFetchAdminDataViaServer();
+        if (!loaded) {
+          setNeedsSupabaseSession(true);
+          setSupabaseSessionReason('no-session');
+        }
+        return;
+      }
+
       const { data, error } = await supabase
         .from('applications')
         .select('*');
@@ -190,32 +320,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
         throw error;
       }
       if (data && Array.isArray(data)) {
-        const mapped: Application[] = data.map(item => {
-          let cName = String(item.candidate_name || (item.user_id ? String(item.user_id).substring(0, 8) : '') || 'Candidato');
-          let cEmail = item.candidate_email ? String(item.candidate_email) : '';
-          let cPhone = item.candidate_phone ? String(item.candidate_phone) : '';
-          if (typeof cName === 'string' && cName.includes('|')) {
-            const parts = cName.split('|');
-            cName = parts[0].trim();
-            if (parts.length > 1 && !cEmail) cEmail = parts[1].trim();
-            if (parts.length > 2 && !cPhone) cPhone = parts[2].trim();
-          }
-
-          return {
-            id: String(item.id ?? `app-${Math.random()}`),
-            jobId: String(item.job_id || ''),
-            jobTitle: String(item.job_title || 'Vaga'),
-            company: String(item.company || 'Empresa'),
-            appliedDate: String(item.created_at || item.applied_date || new Date().toISOString()),
-            status: item.status || 'Em análise',
-            candidateName: cName,
-            cvLink: item.cv_link ? String(item.cv_link) : undefined,
-            cvFileName: item.cv_file_name ? String(item.cv_file_name) : undefined,
-            candidateEmail: cEmail || undefined,
-            candidatePhone: cPhone || undefined
-          };
-        });
-        setApplications(mapped);
+        setApplications(mapRawApplications(data));
       }
     } catch (err: any) {
       console.error('Error fetching applications:', err);
@@ -228,23 +333,23 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
   const fetchAllEnrollments = async () => {
     try {
       setLoading(true);
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session?.user) {
+        const loaded = await tryFetchAdminDataViaServer();
+        if (!loaded) {
+          setNeedsSupabaseSession(true);
+          setSupabaseSessionReason('no-session');
+        }
+        return;
+      }
+
       const { data, error } = await supabase
         .from('enrollments')
         .select('*');
 
       if (error) throw error;
       if (data && Array.isArray(data)) {
-        const mapped: Enrollment[] = data.map(item => ({
-          id: String(item.id ?? `enr-${Math.random()}`),
-          courseId: String(item.course_id || ''),
-          courseTitle: String(item.course_title || 'Curso'),
-          instructor: String(item.instructor || 'Instrutor'),
-          enrolledDate: String(item.enrolled_date || item.created_at || ''),
-          status: item.status || 'Em andamento',
-          progress: Number(item.progress) || 0,
-          userName: String(item.user_name || (item.user_id ? String(item.user_id).substring(0, 8) : '') || 'Aluno')
-        }));
-        setEnrollmentsList(mapped);
+        setEnrollmentsList(mapRawEnrollments(data));
       }
     } catch (err: any) {
       console.error('Error fetching enrollments:', err);
@@ -257,6 +362,21 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
   const fetchAllUsers = async () => {
     try {
       setLoading(true);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUser = sessionData?.session?.user || null;
+      const sessionEmail = String(sessionUser?.email || '').trim().toLowerCase() || null;
+      setActiveSupabaseEmail(sessionEmail);
+
+      if (!sessionUser) {
+        const loadedFromServer = await tryFetchAdminDataViaServer();
+        if (!loadedFromServer) {
+          setUserList([]);
+          setNeedsSupabaseSession(true);
+          setSupabaseSessionReason('no-session');
+        }
+        return;
+      }
+
       const { data, error } = await supabase
         .from('users')
         .select('*');
@@ -266,61 +386,100 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
         setErrorMsg(`Erro de carregamento: ${error.message} - ${error.details || ''}`);
         throw error;
       }
-      console.log('Fetched users raw data:', data);
       if (data && Array.isArray(data)) {
-        const localEmails = getLocalBlockedEmails();
-        const localIds = getLocalBlockedIds();
-
-        const usersWithAdmin = (data as any[]).map(u => {
-          const emailLower = String(u.email || '').trim().toLowerCase();
-          const idStr = String(u.id || '').trim();
-          const isAdm = Boolean(
-            u.is_admin || 
-            u.isAdmin || 
-            u.role === 'Administrador' || 
-            u.cargo === 'Administrador' || 
-            emailLower === 'oportunizahw@gmail.com'
+        const usersWithAdmin = mapRawUsers(data as any[]);
+        const isSessionAdmin =
+          isProtectedAdminEmail(sessionEmail) ||
+          usersWithAdmin.some(
+            u =>
+              (u.id === sessionUser.id || (sessionEmail && u.email?.toLowerCase() === sessionEmail)) &&
+              u.isAdmin
           );
-          const isBlocked = Boolean(
-            isUserRecordBlocked(u) ||
-            (emailLower && localEmails.includes(emailLower)) ||
-            (idStr && localIds.includes(idStr))
-          );
-          const userRole = isBlocked ? 'BLOQUEADO' : String(u.role || u.cargo || (isAdm ? 'Administrador' : 'Estudante'));
-          
-          let resolvedReason = u.block_reason || u.blockReason || '';
-          if (!resolvedReason && typeof u.bio === 'string' && u.bio.includes('[[ACCOUNT_BLOCKED]]:')) {
-            resolvedReason = u.bio.replace('[[ACCOUNT_BLOCKED]]:', '').trim();
-          }
-          if (!resolvedReason && isBlocked) {
-            resolvedReason = getAccountBlockReason({ id: idStr, email: emailLower });
-          }
 
-          return {
-            ...u,
-            id: idStr,
-            name: String(u.name || u.email || 'Usuário'),
-            email: String(u.email || ''),
-            isAdmin: isAdm && !isBlocked,
-            isBlocked: isBlocked,
-            blockReason: isBlocked ? resolvedReason : undefined,
-            status: isBlocked ? 'blocked' : (u.status || 'active'),
-            role: userRole,
-            cargo: userRole
-          };
-        });
-        setUserList(usersWithAdmin as User[]);
-        if (usersWithAdmin.length === 0) {
-          setSuccessMsg("Nenhum usuário encontrado na base de dados.");
+        if (!isSessionAdmin && usersWithAdmin.length <= 1) {
+          const loadedFromServer = await tryFetchAdminDataViaServer();
+          if (loadedFromServer) return;
+          setUserList(usersWithAdmin);
+          setNeedsSupabaseSession(true);
+          setSupabaseSessionReason('non-admin-session');
+          return;
         }
+
+        setNeedsSupabaseSession(false);
+        setSupabaseSessionReason(null);
+        setUserList(usersWithAdmin);
       } else {
-        setSuccessMsg("Nenhum dado retornado.");
+        setUserList([]);
       }
     } catch (err: any) {
       console.error('Error fetching users:', err);
       setErrorMsg(`Erro ao buscar usuários: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleConnectAdminGoogle = async () => {
+    setUnlockError(null);
+    setUnlockLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: getAppRedirectUrl(),
+          queryParams: { prompt: 'select_account' }
+        }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setUnlockError(err?.message || 'Não foi possível iniciar a conexão com Google.');
+      setUnlockLoading(false);
+    }
+  };
+
+  const handleConnectAdminPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = unlockEmail.trim().toLowerCase();
+    if (!cleanEmail || !unlockPassword) {
+      setUnlockError('Informe o e-mail e a senha da sua conta administrativa do Supabase.');
+      return;
+    }
+
+    setUnlockError(null);
+    setUnlockLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: unlockPassword
+      });
+      if (error || !data?.session) {
+        setUnlockError(
+          error?.message === 'Invalid login credentials'
+            ? 'E-mail ou senha incorretos no Supabase Auth. Se a conta Admin usa Google, clique em "Conectar com Google Admin".'
+            : error?.message || 'Não foi possível autenticar a sessão no banco.'
+        );
+        return;
+      }
+
+      setUnlockPassword('');
+      setShowPasswordUnlockForm(false);
+      setNeedsSupabaseSession(false);
+      setSupabaseSessionReason(null);
+
+      await Promise.all([
+        fetchAllUsers(),
+        fetchAllApplications(),
+        fetchAllEnrollments(),
+        fetchAllJobs(),
+        loadAuditLogs()
+      ]);
+
+      setSuccessMsg('Sessão administrativa conectada! Todas as contas cadastradas foram sincronizadas.');
+      setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err: any) {
+      setUnlockError(err?.message || 'Erro ao conectar sessão administrativa.');
+    } finally {
+      setUnlockLoading(false);
     }
   };
 
@@ -394,7 +553,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
       return;
     }
 
-    if (cleanEmail === 'oportunizahw@gmail.com') {
+    if (isProtectedAdminEmail(cleanEmail)) {
       setErrorMsg('Não é permitido bloquear a conta do Administrador Principal.');
       setTimeout(() => setErrorMsg(null), 3000);
       return;
@@ -457,7 +616,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
   const handleSaveUserRole = async (targetUser: User, newRole: string) => {
     if (!targetUser) return;
     const finalRole = newRole.trim() || 'Estudante';
-    const isAdm = finalRole === 'Administrador' || targetUser.email === 'oportunizahw@gmail.com';
+    const isAdm = finalRole === 'Administrador' || isProtectedAdminEmail(targetUser.email);
     const targetId = targetUser.id || 'target-user';
     setSavingRoleUserId(targetId);
 
@@ -1821,6 +1980,31 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                 </div>
               </div>
 
+              {needsSupabaseSession && (
+                <div className="p-4 sm:p-5 rounded-3xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300 shrink-0">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs sm:text-sm font-black text-amber-200">
+                        Nenhuma conta foi apagada — conecte sua sessão do banco para visualizar os cadastros
+                      </p>
+                      <p className="text-[11px] text-amber-100/80 leading-relaxed">
+                        A entrada pelo atalho protege o painel localmente, mas o Supabase (RLS) exige uma sessão autenticada da conta Admin para liberar a listagem de usuários, candidaturas e inscrições.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('accounts')}
+                    className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition-all shrink-0 cursor-pointer active:scale-95"
+                  >
+                    Desbloquear Contas e Dados
+                  </button>
+                </div>
+              )}
+
               {/* Bento Stats Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 
@@ -2841,10 +3025,27 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                   <p className="text-xs text-slate-400">Verificando banco de dados...</p>
                 </div>
               ) : applications.length === 0 ? (
-                <div className="py-16 text-center bg-slate-900 border border-slate-850 rounded-3xl">
-                  <ShieldAlert className="w-12 h-12 text-slate-655 mx-auto mb-3" />
-                  <p className="text-sm font-bold text-slate-300">Nenhum registro encontrado</p>
-                  <p className="text-xs text-slate-500 mt-1">Os candidatos cadastrados aparecerão aqui em tempo real.</p>
+                <div className="py-16 text-center bg-slate-900 border border-slate-850 rounded-3xl px-4">
+                  <ShieldAlert className="w-12 h-12 text-slate-500 mx-auto mb-3" />
+                  <p className="text-sm font-bold text-slate-200">
+                    {needsSupabaseSession
+                      ? 'Aguardando conexão com a sessão Admin do Supabase'
+                      : 'Nenhum registro encontrado'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                    {needsSupabaseSession
+                      ? 'Suas candidaturas continuam salvas no banco. Conecte sua sessão Admin na aba Contas para visualizar todas as candidaturas.'
+                      : 'Os candidatos cadastrados aparecerão aqui em tempo real.'}
+                  </p>
+                  {needsSupabaseSession && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('accounts')}
+                      className="mt-4 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs cursor-pointer"
+                    >
+                      Conectar Sessão Admin
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -2966,8 +3167,25 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                   <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-4 text-slate-500">
                     <BookOpen className="w-8 h-8" />
                   </div>
-                  <h3 className="text-sm font-bold text-white mb-2">Sem inscrições registradas</h3>
-                  <p className="text-[10px] text-slate-400 max-w-xs">Aguarde até que os alunos comecem a se inscrever em cursos.</p>
+                  <h3 className="text-sm font-bold text-white mb-2">
+                    {needsSupabaseSession
+                      ? 'Sessão Admin do banco desconectada'
+                      : 'Sem inscrições registradas'}
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-md">
+                    {needsSupabaseSession
+                      ? 'As inscrições existentes permanecem salvas no Supabase. Conecte sua sessão Admin para carregá-las.'
+                      : 'Aguarde até que os alunos comecem a se inscrever em cursos.'}
+                  </p>
+                  {needsSupabaseSession && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('accounts')}
+                      className="mt-4 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs cursor-pointer"
+                    >
+                      Conectar Sessão Admin
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="bg-slate-900 border border-slate-800 rounded-[32px] overflow-hidden">
@@ -3055,11 +3273,134 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                     onClick={fetchAllUsers}
                     className="px-5 py-3 bg-slate-950 text-slate-300 border border-slate-800 hover:border-slate-700 font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 shadow-sm"
                   >
-                    <Clock className="w-4 h-4 text-[#52A8C7]" />
+                    <RefreshCw className="w-4 h-4 text-[#52A8C7]" />
                     <span>Sincronizar Banco</span>
                   </button>
                 </div>
               </div>
+
+              {/* Proteção RLS: explicação transparente + desbloqueio da sessão Supabase Admin */}
+              {needsSupabaseSession && (
+                <div className="p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 border border-amber-500/35 shadow-2xl space-y-5">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/35 flex items-center justify-center text-amber-300 shrink-0">
+                        <Lock className="w-5 h-5" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                            Nenhuma conta foi apagada
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-black uppercase tracking-wider">
+                            Proteção RLS Ativa
+                          </span>
+                        </div>
+                        <h3 className="text-base font-black text-white">
+                          {supabaseSessionReason === 'non-admin-session'
+                            ? `Sessão atual (${activeSupabaseEmail || 'usuário padrão'}) sem permissão de listagem total`
+                            : 'Conecte sua sessão Admin do Supabase para listar as contas já cadastradas'}
+                        </h3>
+                        <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                          Todos os usuários já cadastrados continuam salvos com segurança no banco de dados. Como você entrou apenas pelo atalho secreto (<code className="text-sky-300 font-mono">Ctrl + Shift + Alt + A</code>), o navegador ainda não possui o token autenticado da conta administradora exigido pelas políticas de segurança (RLS) do Supabase.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleConnectAdminGoogle}
+                        disabled={unlockLoading}
+                        className="px-4 py-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-black text-xs transition-all flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 disabled:opacity-50"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-sky-600" />
+                        <span>Conectar com Google Admin</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPasswordUnlockForm((prev) => !prev);
+                          setUnlockError(null);
+                        }}
+                        className="px-4 py-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition-all cursor-pointer active:scale-95"
+                      >
+                        {showPasswordUnlockForm ? 'Ocultar E-mail e Senha' : 'Entrar com E-mail e Senha'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showPasswordUnlockForm && (
+                    <form
+                      onSubmit={handleConnectAdminPassword}
+                      className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3"
+                      autoComplete="off"
+                    >
+                      <p className="text-[11px] text-slate-400">
+                        Use o e-mail e a senha da conta administradora cadastrada no Supabase Auth (se você criou essa conta com o Google em um navegador embutido, abra o site em uma aba normal e use &ldquo;Conectar com Google Admin&rdquo;).
+                      </p>
+
+                      {unlockError && (
+                        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+                          <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <span>{unlockError}</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="relative">
+                          <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="email"
+                            value={unlockEmail}
+                            onChange={(e) => setUnlockEmail(e.target.value)}
+                            placeholder="E-mail da conta Admin"
+                            disabled={unlockLoading}
+                            required
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-sky-500 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-500 outline-none"
+                          />
+                        </div>
+
+                        <div className="relative">
+                          <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type={showUnlockPassword ? 'text' : 'password'}
+                            value={unlockPassword}
+                            onChange={(e) => setUnlockPassword(e.target.value)}
+                            placeholder="Senha da conta no Supabase"
+                            disabled={unlockLoading}
+                            required
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-sky-500 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-500 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowUnlockPassword((prev) => !prev)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                          >
+                            {showUnlockPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={unlockLoading}
+                          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          {unlockLoading ? (
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Autenticar e Carregar Contas</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
 
               {/* Organograma da Hierarquia Oficial (5 Níveis de Acesso) */}
               <div className="space-y-2">
@@ -3090,7 +3431,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                     </div>
                     <div className="mt-1">
                       <span className="text-xl font-black text-amber-300 block">
-                        {userList.filter(u => String(u.email || '').toLowerCase() === 'oportunizahw@gmail.com' || String(u.role || u.cargo || '').toLowerCase().includes('criador') || (u.isAdmin && !String(u.role || u.cargo || '').toLowerCase().includes('atendimento'))).length}
+                        {userList.filter(u => isProtectedAdminEmail(u.email) || String(u.role || u.cargo || '').toLowerCase().includes('criador') || (u.isAdmin && !String(u.role || u.cargo || '').toLowerCase().includes('atendimento'))).length}
                       </span>
                       <span className="text-[10px] font-bold text-slate-300 block truncate">Admin Criador</span>
                     </div>
@@ -3327,7 +3668,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
 
                             const roleText = String(u.role || u.cargo || '').toLowerCase();
                             const emailText = String(u.email || '').toLowerCase();
-                            const isAppCreator = emailText === 'oportunizahw@gmail.com' || roleText.includes('criador') || (u.isAdmin && !roleText.includes('atendimento'));
+                            const isAppCreator = isProtectedAdminEmail(emailText) || roleText.includes('criador') || (u.isAdmin && !roleText.includes('atendimento'));
                             const isSupport = roleText.includes('atendimento') || roleText.includes('suporte') || roleText.includes('moderador');
                             const isCompany = !isAppCreator && (u.accountType === 'company' || roleText === 'empresa' || Boolean(u.cnpj && !roleText.includes('recrutador')));
                             const isCompanyUser = roleText.includes('recrutador') || roleText.includes('rh') || roleText.includes('usuário da empresa') || roleText.includes('usuario da empresa');
@@ -3515,10 +3856,18 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                   </div>
 
                   {userList.length === 0 && (
-                    <div className="py-16 text-center text-slate-400 space-y-2">
+                    <div className="py-16 text-center text-slate-400 space-y-2 px-4">
                       <Users className="w-8 h-8 mx-auto text-slate-600 mb-2" />
-                      <p className="text-sm font-bold text-white">Nenhum usuário cadastrado encontrado.</p>
-                      <p className="text-xs text-slate-500">Quando novos usuários criarem contas, eles aparecerão aqui automaticamente.</p>
+                      <p className="text-sm font-bold text-white">
+                        {needsSupabaseSession
+                          ? 'Sessão do Supabase aguardando conexão'
+                          : 'Nenhum usuário cadastrado encontrado.'}
+                      </p>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        {needsSupabaseSession
+                          ? 'Nenhuma conta foi excluída. Use o painel acima ("Conectar com Google Admin" ou "Entrar com E-mail e Senha") para liberar a visualização das contas.'
+                          : 'Quando novos usuários criarem contas, eles aparecerão aqui automaticamente.'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -3683,7 +4032,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                           if (!matches) return false;
 
                           if (auditFilterTier === 'Todos') return true;
-                          if (auditFilterTier === 'Admin Criador') return String(log.actor_role || '').toLowerCase().includes('criador') || String(log.actor_name || '').toLowerCase().includes('pedro');
+                          if (auditFilterTier === 'Admin Criador') return String(log.actor_role || '').toLowerCase().includes('criador') || isProtectedAdminEmail(log.actor_email);
                           if (auditFilterTier === 'Atendimento') return String(log.actor_role || '').toLowerCase().includes('atendimento');
                           if (auditFilterTier === 'Empresa') return String(log.actor_role || '').toLowerCase().includes('empresa');
                           if (auditFilterTier === 'Anti-Fraude') return String(log.actor_role || '').toLowerCase().includes('anti') || log.status === 'blocked';

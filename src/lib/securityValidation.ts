@@ -527,6 +527,31 @@ export function sanitizeExternalUrl(rawUrl?: string | null): string | null {
 }
 
 /**
+ * Strips PostgREST .or() filter control characters (commas, parentheses, wildcards, backslashes)
+ * to prevent filter-injection attacks on user-supplied identifiers.
+ */
+export function sanitizePostgrestFilterValue(raw?: string | null): string {
+  return String(raw || '')
+    .replace(/[\0\r\n\\,*()%'"`;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+/**
+ * Removes control characters, zero-width spoofing characters, and HTML/script tags from user input.
+ */
+export function sanitizePlainText(raw?: string | null, maxLength = 500): string {
+  return String(raw || '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200D\uFEFF]/g, '')
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/(?:javascript|vbscript|data):/gi, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+/**
  * Cryptographically strong 8-digit code generator (falls back only if crypto is unavailable)
  */
 export function generateSecureOtpCode(): string {
@@ -624,17 +649,16 @@ function sha256HexSync(input: string): string {
   return Array.from(H).map((n) => n.toString(16).padStart(8, '0')).join('');
 }
 
-const ADMIN_FALLBACK_SALT = 'optz-adm-v2-1750ded1892039cc';
-const ADMIN_FALLBACK_SHA256 = 'ae2cd42eebcc662cea2170ed524f8f50481f40c6b9bc5380aff7a67e8ded7734';
+const PROTECTED_OWNER_DIGEST = '1681cdebea1ef8e10f51dd3f8274e61b493b98851181bc3467764c8d58b620cf';
 
 /**
- * Verifies the emergency static admin access code using a salted SHA-256 digest (no plaintext secret in JS bundle)
+ * Checks whether an email matches the protected root owner via one-way salted SHA-256 digest
+ * (no plaintext email or admin password hash is ever shipped in client JS).
  */
-export function verifyAdminAccessCodeClient(candidate: string): boolean {
-  const clean = candidate || '';
+export function isProtectedAdminEmail(email?: string | null): boolean {
+  const clean = (email || '').trim().toLowerCase();
   if (!clean) return false;
-  const computed = sha256HexSync(`${ADMIN_FALLBACK_SALT}:${clean}`);
-  return timingSafeEqualHex(computed, ADMIN_FALLBACK_SHA256);
+  return timingSafeEqualHex(sha256HexSync(`optz-owner-id:${clean}`), PROTECTED_OWNER_DIGEST);
 }
 
 /**

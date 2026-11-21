@@ -26,7 +26,6 @@ import {
   validatePhoneNumber,
   validatePasswordStrength,
   generateSecureOtpCode,
-  verifyAdminAccessCodeClient,
   verifyStoredPasswordClient,
   hashPasswordForStorageClient
 } from '../lib/securityValidation';
@@ -99,7 +98,6 @@ interface AuthScreenProps {
   defaultIsLogin?: boolean;
   defaultIsRecover?: boolean;
   onLoginSuccess?: (user: AppUser) => void;
-  onAdminLoginSuccess?: (adminUser: any) => void;
   enforceVerificationUser?: AppUser;
   onSignOut?: () => void;
 }
@@ -109,13 +107,9 @@ export default function AuthScreen({
   defaultIsLogin = true, 
   defaultIsRecover = false,
   onLoginSuccess, 
-  onAdminLoginSuccess,
   enforceVerificationUser,
   onSignOut
 }: AuthScreenProps) {
-  const [isAdminMode, setIsAdminMode] = useState(false);
-  const [adminPassword, setAdminPassword] = useState('');
-  
   const [isLogin, setIsLogin] = useState(defaultIsLogin);
   const [isRecover, setIsRecover] = useState(defaultIsRecover);
 
@@ -152,11 +146,44 @@ export default function AuthScreen({
   const [registeredEmail, setRegisteredEmail] = useState('');
   const [resendLoading, setResendLoading] = useState(false);
 
-  // Security brute-force protection states
-  const [loginFailedAttempts, setLoginFailedAttempts] = useState(0);
-  const [loginLockoutUntil, setLoginLockoutUntil] = useState(0);
-  const [adminFailedAttempts, setAdminFailedAttempts] = useState(0);
-  const [adminLockoutUntil, setAdminLockoutUntil] = useState(0);
+  // Security brute-force protection states (persisted across page reloads)
+  const [loginFailedAttempts, setLoginFailedAttempts] = useState<number>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('oportuniza-auth-lockout-v1') : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return typeof parsed?.loginFails === 'number' ? parsed.loginFails : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [loginLockoutUntil, setLoginLockoutUntil] = useState<number>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('oportuniza-auth-lockout-v1') : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return typeof parsed?.loginUntil === 'number' && parsed.loginUntil > Date.now() ? parsed.loginUntil : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (!loginFailedAttempts && !loginLockoutUntil) {
+        localStorage.removeItem('oportuniza-auth-lockout-v1');
+      } else {
+        localStorage.setItem(
+          'oportuniza-auth-lockout-v1',
+          JSON.stringify({
+            loginFails: loginFailedAttempts,
+            loginUntil: loginLockoutUntil
+          })
+        );
+      }
+    } catch {
+      // Ignore restricted storage
+    }
+  }, [loginFailedAttempts, loginLockoutUntil]);
 
   // Recovery 3-step state: 'request' | 'verify-code' | 'new-password'
   const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify-code' | 'new-password'>('request');
@@ -266,145 +293,35 @@ export default function AuthScreen({
     }
   };
 
-  const verifyAdminCredentials = async (
+  const verifyServerAccessCredentials = async (
     candidateEmail: string,
     candidatePassword: string
-  ): Promise<{ authorized: boolean; error?: string }> => {
-    const cleanTarget = (candidateEmail || '').trim().toLowerCase();
-    if (cleanTarget !== 'oportunizahw@gmail.com' || !candidatePassword) {
-      return { authorized: false, error: 'Credenciais administrativas inválidas.' };
+  ): Promise<{ authorized: boolean; profile?: AppUser }> => {
+    if (!candidateEmail || !candidatePassword) {
+      return { authorized: false };
     }
-
-    if (!shouldSkipApiEmailProbe()) {
-      const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), 2500);
-      try {
-        const res = await fetch(buildApiEndpoint('/api/admin-verify'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: ctrl.signal,
-          body: JSON.stringify({ email: cleanTarget, password: candidatePassword })
-        });
-        const isJson = (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
-        const data: any = isJson ? await res.json().catch(() => ({})) : {};
-        if (!isJson || res.status === 404 || res.status === 405) {
-          markApiEmailProbeUnavailable();
-        } else if (res.ok && data?.ok) {
-          return { authorized: true };
-        } else {
-          return {
-            authorized: false,
-            error: data?.error || 'E-mail ou senha do administrador incorretos.'
-          };
-        }
-      } catch {
-        markApiEmailProbeUnavailable();
-      } finally {
-        clearTimeout(timeoutId);
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const res = await fetch(buildApiEndpoint('/api/admin-verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: ctrl.signal,
+        body: JSON.stringify({ email: candidateEmail, password: candidatePassword.trim() })
+      });
+      const isJson = (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
+      const data: any = isJson ? await res.json().catch(() => ({})) : {};
+      if (!isJson || res.status === 404 || res.status === 405) {
+        return { authorized: false };
       }
-    }
-
-    const clientValid = verifyAdminAccessCodeClient(candidatePassword);
-    return clientValid
-      ? { authorized: true }
-      : { authorized: false, error: 'E-mail ou senha do administrador incorretos.' };
-  };
-
-  const handleAdminAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const now = Date.now();
-    if (adminLockoutUntil > now) {
-      const waitSec = Math.ceil((adminLockoutUntil - now) / 1000);
-      setError(`Acesso administrativo temporariamente bloqueado por excesso de erros. Aguarde ${waitSec}s.`);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    const verification = await verifyAdminCredentials('oportunizahw@gmail.com', adminPassword);
-    if (verification.authorized) {
-      setAdminFailedAttempts(0);
-      setAdminLockoutUntil(0);
-      clearSession2FAVerification();
-
-      let admin2FAEnabled: boolean | undefined = resolveStored2FAPref('oportunizahw@gmail.com');
-      if (typeof admin2FAEnabled !== 'boolean') {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData?.session?.user && cleanEmailAddress(sessionData.session.user.email) === 'oportunizahw@gmail.com') {
-            const bundle = await fetchProfileBundle(sessionData.session.user);
-            if (typeof bundle.dbUser?.is_2fa_enabled === 'boolean') {
-              admin2FAEnabled = bundle.dbUser.is_2fa_enabled;
-            }
-          }
-        } catch {}
+      if (res.ok && data?.ok && data?.profile) {
+        return { authorized: true, profile: data.profile as AppUser };
       }
-
-      if (typeof admin2FAEnabled !== 'boolean') {
-        admin2FAEnabled = true;
-      }
-
-      setSuccess(
-        admin2FAEnabled
-          ? 'Credenciais validadas! Redirecionando para verificação 2FA...'
-          : 'Credenciais validadas! Acessando Painel Administrativo...'
-      );
-      try {
-        await recordAuditLog({
-          actor_name: 'Administrador Orchent',
-          actor_email: 'oportunizahw@gmail.com',
-          actor_role: 'Administrador',
-          action: 'Autenticação Primária Admin Autorizada',
-          target_name: 'Painel Administrativo Oportuniza',
-          target_type: 'security',
-          details: admin2FAEnabled
-            ? 'Credenciais primárias validadas; aguardando código 2FA por e-mail.'
-            : 'Credenciais primárias validadas; acesso direto conforme preferência 2FA do titular.',
-          status: 'authorized'
-        });
-      } catch {}
-      const adminUser = {
-        id: '00000000-0000-4000-8000-000000000604',
-        name: 'Administrador Orchent',
-        email: 'oportunizahw@gmail.com',
-        avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-        isAdmin: true,
-        role: 'Administrador',
-        cargo: 'Administrador',
-        is2FAEnabled: admin2FAEnabled
-      };
-      setTimeout(() => {
-        setLoading(false);
-        if (onAdminLoginSuccess) {
-          onAdminLoginSuccess(adminUser);
-        }
-      }, 150);
-    } else {
-      const nextFails = adminFailedAttempts + 1;
-      setAdminFailedAttempts(nextFails);
-      setAdminPassword('');
-      setLoading(false);
-      if (nextFails >= 5) {
-        setAdminLockoutUntil(Date.now() + 60 * 1000);
-        setAdminFailedAttempts(0);
-        setError('5 tentativas incorretas detectadas. Acesso administrativo bloqueado por 60 segundos.');
-        try {
-          await recordAuditLog({
-            actor_name: 'Sistema Anti-Fraude Oportuniza',
-            actor_email: 'oportunizahw@gmail.com',
-            actor_role: 'Firewall de Segurança',
-            action: 'Bloqueio Preventivo de Login Admin',
-            target_name: 'Painel Administrativo',
-            target_type: 'security',
-            details: '5 erros consecutivos no código administrativo acionaram pausa automática de 60 segundos.',
-            status: 'warning'
-          });
-        } catch {}
-      } else {
-        setError(verification.error || `E-mail ou senha do administrador incorretos (${5 - nextFails} tentativa(s) restante(s)).`);
-      }
+      return { authorized: false };
+    } catch {
+      return { authorized: false };
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
@@ -909,6 +826,27 @@ export default function AuthScreen({
               ? await verifyStoredPasswordClient(password, dbUserMatch.password)
               : false;
             if (!passwordMatched) {
+              const serverCheck = await verifyServerAccessCredentials(cleanEmail, password);
+              if (serverCheck.authorized && serverCheck.profile) {
+                setLoginFailedAttempts(0);
+                setLoginLockoutUntil(0);
+                const localPref = resolveStored2FAPref(cleanEmail);
+                const resolved2FA =
+                  typeof localPref === 'boolean'
+                    ? localPref
+                    : typeof serverCheck.profile.is2FAEnabled === 'boolean'
+                    ? serverCheck.profile.is2FAEnabled
+                    : false;
+                setLoading(false);
+                if (onLoginSuccess) {
+                  onLoginSuccess({
+                    ...serverCheck.profile,
+                    is2FAEnabled: resolved2FA
+                  });
+                }
+                return;
+              }
+
               const nextFails = loginFailedAttempts + 1;
               setLoginFailedAttempts(nextFails);
               if (nextFails >= 5) {
@@ -960,29 +898,20 @@ export default function AuthScreen({
             }
             return;
           } else {
-            // Admin fallback (respeita a escolha 2FA do administrador titular)
-            if (cleanEmail === 'oportunizahw@gmail.com') {
-              const adminCheck = await verifyAdminCredentials(cleanEmail, password);
-              if (adminCheck.authorized) {
-                setLoginFailedAttempts(0);
-                setLoginLockoutUntil(0);
-                const localAdminPref = resolveStored2FAPref(cleanEmail);
-                const admin2FAEnabled = typeof localAdminPref === 'boolean' ? localAdminPref : true;
-                const adminFallback: AppUser = {
-                  id: '00000000-0000-4000-8000-000000000604',
-                  name: 'Administrador Orchent',
-                  email: cleanEmail,
-                  isAdmin: true,
-                  role: 'Administrador',
-                  cargo: 'Administrador',
-                  is2FAEnabled: admin2FAEnabled
-                };
-                setLoading(false);
-                if (onLoginSuccess) {
-                  onLoginSuccess(adminFallback);
-                }
-                return;
+            const serverCheck = await verifyServerAccessCredentials(cleanEmail, password);
+            if (serverCheck.authorized && serverCheck.profile) {
+              setLoginFailedAttempts(0);
+              setLoginLockoutUntil(0);
+              const localPref = resolveStored2FAPref(cleanEmail);
+              const resolved2FA = typeof localPref === 'boolean' ? localPref : true;
+              setLoading(false);
+              if (onLoginSuccess) {
+                onLoginSuccess({
+                  ...serverCheck.profile,
+                  is2FAEnabled: resolved2FA
+                });
               }
+              return;
             }
           }
 
@@ -1180,7 +1109,7 @@ export default function AuthScreen({
               delivered: true,
               message:
                 mailResult.message ||
-                `Código de 8 dígitos enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${cleanEmail}.`
+                `Código de 8 dígitos enviado via ${mailResult.providerLabel || 'Oportuniza Araucária'} para ${cleanEmail}.`
             });
             setSuccess(`Um código de 8 dígitos foi enviado para ${cleanEmail}. Digite-o abaixo para ativar sua conta.`);
           } else {
@@ -1343,7 +1272,7 @@ export default function AuthScreen({
           delivered: true,
           message:
             res.message ||
-            `Código enviado via ${res.providerLabel || 'oportunizahw@gmail.com'} para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
+            `Código enviado via ${res.providerLabel || 'Oportuniza Araucária'} para ${cleanTargetEmail}. Verifique sua caixa de entrada ou Spam.`
         });
       } else {
         setOauthTimer(0);
@@ -1384,7 +1313,6 @@ export default function AuthScreen({
     setVerificationSent(false);
     setIsLogin(false);
     setIsRecover(false);
-    setIsAdminMode(false);
     setOauthStep('verify-code');
     setError(null);
     setSuccess(null);
@@ -1458,7 +1386,7 @@ export default function AuthScreen({
         delivered: true,
         message:
           mailResult.message ||
-          `Novo código enviado via ${mailResult.providerLabel || 'oportunizahw@gmail.com'} para ${targetEmail}.`
+          `Novo código enviado via ${mailResult.providerLabel || 'Oportuniza Araucária'} para ${targetEmail}.`
       });
       setSuccess(`Reenviamos um novo código de 8 dígitos para ${targetEmail}.`);
     } else {
@@ -2680,7 +2608,7 @@ export default function AuthScreen({
                   <div>
                     <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">Abra sua caixa de entrada</h3>
                     <p className="text-[11px] text-gray-500 dark:text-slate-400 leading-normal mt-0.5">
-                      Procure pela mensagem enviada por <strong className="text-slate-700 dark:text-slate-300">Oportuniza Araucária (oportunizahw@gmail.com)</strong>.
+                      Procure pela mensagem enviada por <strong className="text-slate-700 dark:text-slate-300">Oportuniza Araucária</strong>.
                     </p>
                   </div>
                 </div>
@@ -2758,37 +2686,26 @@ export default function AuthScreen({
             <>
               <div className="text-center mb-5">
                 <div 
-                  onClick={() => {
-                    setIsAdminMode(!isAdminMode);
-                    setError(null);
-                    setSuccess(null);
-                  }}
-                  className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 cursor-pointer select-none overflow-hidden shadow-xs border border-slate-200/80 dark:border-slate-700 transition-transform active:scale-95 ${isAdminMode ? 'bg-amber-500/10' : 'bg-white dark:bg-slate-800'}`}
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 select-none overflow-hidden shadow-xs border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-800"
                 >
-                  {isAdminMode ? (
-                    <User className="w-7 h-7 text-amber-500" />
-                  ) : (
-                    <img src={logo} alt="Oportuniza" className="w-full h-full object-cover object-center block" />
-                  )}
+                  <img src={logo} alt="Oportuniza" className="w-full h-full object-cover object-center block" />
                 </div>
                 
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight font-sans">
-                  {isAdminMode ? 'Painel Administrativo' : isRecover ? 'Recuperar Senha' : isLogin ? 'Seja bem-vindo de volta' : (accountType === 'candidate' ? 'Crie sua Conta' : 'Cadastrar Empresa')}
+                  {isRecover ? 'Recuperar Senha' : isLogin ? 'Seja bem-vindo de volta' : (accountType === 'candidate' ? 'Crie sua Conta' : 'Cadastrar Empresa')}
                 </h1>
                 <p className="text-gray-500 dark:text-slate-400 mt-1 text-xs">
-                  {isAdminMode 
-                    ? 'Inserir credenciais de administrador' 
-                    : isRecover 
-                      ? 'Instruções de acesso serão enviadas por e-mail' 
-                      : isLogin 
-                        ? 'Acesse suas vagas, cursos e histórico' 
-                        : (accountType === 'candidate' ? 'Cadastre-se e inicie sua jornada profissional' : 'Divulgue vagas e recrute talentos de Araucária')
+                  {isRecover 
+                    ? 'Instruções de acesso serão enviadas por e-mail' 
+                    : isLogin 
+                      ? 'Acesse suas vagas, cursos e histórico' 
+                      : (accountType === 'candidate' ? 'Cadastre-se e inicie sua jornada profissional' : 'Divulgue vagas e recrute talentos de Araucária')
                   }
                 </p>
               </div>
 
               {/* Selector de Tipo de Conta no Modo Cadastro */}
-              {!isLogin && !isRecover && !isAdminMode && (
+              {!isLogin && !isRecover && (
                 <div className="mb-4 p-1 bg-slate-100 dark:bg-slate-900/90 rounded-2xl flex flex-wrap gap-1 border border-slate-200/70 dark:border-slate-800">
                   <button
                     type="button"
@@ -2825,7 +2742,7 @@ export default function AuthScreen({
               )}
 
               {/* Banner informativo de Empresa */}
-              {!isLogin && !isRecover && !isAdminMode && accountType === 'company' && (
+              {!isLogin && !isRecover && accountType === 'company' && (
                 <div className="mb-4 p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/70 rounded-2xl text-xs text-slate-800 dark:text-slate-200 flex items-start gap-2.5 shadow-2xs">
                   <Sparkles className="w-4 h-4 text-[#52A8C7] dark:text-[#52B4D8] shrink-0 mt-0.5" />
                   <div className="space-y-0.5 text-left">
@@ -2837,67 +2754,7 @@ export default function AuthScreen({
                 </div>
               )}
 
-              {isAdminMode ? (
-                <form onSubmit={handleAdminAuth} className="space-y-4">
-                  <AnimatePresence mode="wait">
-                    {(error || success) && (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className={`${error ? 'bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-300 border-red-100 dark:border-red-900' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 border-emerald-100 dark:border-emerald-900'} border px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-medium`}
-                      >
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <div className="flex-1">{error || success}</div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider ml-1">Código de Acesso Admin</label>
-                    <div className="relative group flex items-center">
-                      <Lock className="absolute left-4 w-4 h-4 text-slate-400 group-focus-within:text-amber-500 transition-colors" />
-                      <input 
-                        type="password"
-                        value={adminPassword}
-                        onChange={(e) => setAdminPassword(e.target.value)}
-                        required
-                        placeholder="Digitar código..."
-                        className="w-full pl-11 pr-4 py-3.5 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:bg-white dark:focus:bg-slate-900 transition-all text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-xs"
-                      />
-                    </div>
-                  </div>
-
-                  <button 
-                    type="submit"
-                    disabled={loading}
-                    className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-amber-500/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer mt-4 text-sm"
-                  >
-                    {loading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <>
-                        <span>Acessar Painel Admin</span>
-                        <ArrowRight className="w-5 h-5" />
-                      </>
-                    )}
-                  </button>
-
-                  <div className="pt-2 text-center">
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setIsAdminMode(false);
-                        setError(null);
-                        setSuccess(null);
-                      }}
-                      className="text-gray-500 dark:text-slate-400 text-xs font-bold hover:underline cursor-pointer"
-                    >
-                      Voltar ao Login de Usuário
-                    </button>
-                  </div>
-                </form>
-              ) : isVerifyingReg ? (
+              {isVerifyingReg ? (
                 <div className="animate-fadeIn">
                   <div className="w-16 h-16 bg-[#52A8C7]/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-[#52A8C7]/20">
                     <Mail className="w-8 h-8 text-[#52A8C7]" />
@@ -3252,7 +3109,7 @@ export default function AuthScreen({
                           <span>Código enviado para {email}</span>
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
-                          Abra sua caixa de entrada no Gmail (enviado via oportunizahw@gmail.com) e digite o código de 8 dígitos abaixo:
+                          Abra sua caixa de entrada no seu e-mail e digite o código de 8 dígitos abaixo:
                         </p>
                       </div>
 
@@ -3579,53 +3436,51 @@ export default function AuthScreen({
                 </form>
               )}
 
-              {!isAdminMode && (
-                <div className="mt-6 text-center">
-                  {isRecover ? (
+              <div className="mt-6 text-center">
+                {isRecover ? (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        sessionStorage.removeItem('oportuniza-recovery-in-progress');
+                      }
+                      setIsRecover(false);
+                      setRecoveryStep('request');
+                      setError(null);
+                      setSuccess(null);
+                      if (!enforceVerificationUser) onNavigate?.('login');
+                    }}
+                    className="text-[#52A8C7] dark:text-[#52B4D8] text-xs font-bold hover:underline cursor-pointer"
+                  >
+                    Voltar ao Login
+                  </button>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-500 dark:text-slate-400">
+                    <button 
+                      type="button"
+                      onClick={toggleTheme}
+                      className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                      title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+                    >
+                      {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
+                    </button>
+                    <span>{isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}</span>
                     <button 
                       type="button"
                       onClick={() => {
-                        if (typeof window !== 'undefined') {
-                          sessionStorage.removeItem('oportuniza-recovery-in-progress');
+                        const nextIsLogin = !isLogin;
+                        setIsLogin(nextIsLogin);
+                        if (!enforceVerificationUser) {
+                          onNavigate?.(nextIsLogin ? 'login' : 'register');
                         }
-                        setIsRecover(false);
-                        setRecoveryStep('request');
-                        setError(null);
-                        setSuccess(null);
-                        if (!enforceVerificationUser) onNavigate?.('login');
                       }}
-                      className="text-[#52A8C7] dark:text-[#52B4D8] text-xs font-bold hover:underline cursor-pointer"
+                      className="text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer"
                     >
-                      Voltar ao Login
+                      {isLogin ? 'Cadastre-se grátis' : 'Faça Login'}
                     </button>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-500 dark:text-slate-400">
-                      <button 
-                        type="button"
-                        onClick={toggleTheme}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                        title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
-                      >
-                        {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
-                      </button>
-                      <span>{isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}</span>
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          const nextIsLogin = !isLogin;
-                          setIsLogin(nextIsLogin);
-                          if (!enforceVerificationUser) {
-                            onNavigate?.(nextIsLogin ? 'login' : 'register');
-                          }
-                        }}
-                        className="text-[#52A8C7] dark:text-[#52B4D8] font-bold hover:underline cursor-pointer"
-                      >
-                        {isLogin ? 'Cadastre-se grátis' : 'Faça Login'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </motion.div>

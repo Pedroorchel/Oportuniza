@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { isProtectedAdminEmail } from './securityValidation';
 
 const BLOCKED_EMAILS_KEY = 'oportuniza_blocked_emails';
 const BLOCKED_IDS_KEY = 'oportuniza_blocked_ids';
@@ -252,7 +253,7 @@ export function saveLocalBlocked(emails: string[], ids: string[], reasons?: Reco
 export function isUserRecordBlocked(u: any): boolean {
   if (!u) return false;
   // Super admin whitelist protection
-  if (u.email && String(u.email).trim().toLowerCase() === 'oportunizahw@gmail.com') {
+  if (isProtectedAdminEmail(u.email)) {
     return false;
   }
   if (u.is_blocked === true || u.is_blocked === 'true' || u.isBlocked === true) return true;
@@ -276,7 +277,7 @@ export async function isAccountBlocked(identifier: { id?: string; email?: string
   const userId = (identifier.id || '').trim();
 
   // Root developer is never blocked
-  if (cleanEmail === 'oportunizahw@gmail.com') {
+  if (isProtectedAdminEmail(cleanEmail)) {
     return false;
   }
 
@@ -392,7 +393,7 @@ export async function blockUserAccount(userId?: string, email?: string, name?: s
   const cleanReason = (reason || '').trim() || 'Violação das diretrizes da comunidade ou termos de uso';
 
   // Root developer protection
-  if (cleanEmail === 'oportunizahw@gmail.com') {
+  if (isProtectedAdminEmail(cleanEmail)) {
     throw new Error('Não é permitido bloquear a conta do Administrador Principal.');
   }
 
