@@ -1098,7 +1098,7 @@ export default function App() {
         job_id: job.id,
         job_title: job.title,
         company: job.company,
-        applied_date: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        applied_date: new Date().toISOString(),
         status: 'Em análise',
         candidate_name: candidateFullInfo,
         candidate_email: user.email,
@@ -1112,7 +1112,7 @@ export default function App() {
         job_id: job.id,
         job_title: job.title,
         company: job.company,
-        applied_date: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        applied_date: new Date().toISOString(),
         status: 'Em análise',
         candidate_name: candidateFullInfo,
         cv_link: sanitizedCvLink || null,
@@ -1124,7 +1124,7 @@ export default function App() {
         job_id: job.id,
         job_title: job.title,
         company: job.company,
-        applied_date: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        applied_date: new Date().toISOString(),
         status: 'Em análise',
         candidate_name: cvInfoString ? `${candidateFullInfo} | ${cvInfoString}` : candidateFullInfo,
         cv_link: sanitizedCvLink || (cvInfo?.fileName ? `Arquivo: ${cvInfo.fileName}` : null)
@@ -1135,7 +1135,7 @@ export default function App() {
         job_id: job.id,
         job_title: job.title,
         company: job.company,
-        applied_date: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        applied_date: new Date().toISOString(),
         status: 'Em análise',
         candidate_name: cvInfoString ? `${candidateFullInfo} | ${cvInfoString}` : candidateFullInfo
       },
@@ -1341,7 +1341,7 @@ export default function App() {
         course_id: course.id,
         course_title: course.title,
         instructor: course.instructor,
-        enrolled_date: new Date().toLocaleDateString('pt-BR'),
+        enrolled_date: new Date().toISOString(),
         status: 'Iniciado',
         progress: 0
       },
@@ -1350,7 +1350,7 @@ export default function App() {
         user_id: user.id,
         course_id: course.id,
         course_title: course.title,
-        enrolled_date: new Date().toLocaleDateString('pt-BR'),
+        enrolled_date: new Date().toISOString(),
         status: 'Iniciado',
         progress: 0
       },
