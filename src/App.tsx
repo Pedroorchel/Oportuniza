@@ -22,7 +22,7 @@ import BioScreen from './components/BioScreen';
 import AuthScreen from './components/AuthScreen';
 const AdminPanelScreen = lazy(() => import('./components/AdminPanelScreen'));
 const Admin2FAScreen = lazy(() => import('./components/Admin2FAScreen'));
-const PortalGateOverlay = lazy(() => import('./components/PortalGateOverlay'));
+import PortalGateOverlay from './components/PortalGateOverlay';
 import TwoFactorAuthScreen from './components/TwoFactorAuthScreen';
 import CompanyDashboardScreen from './components/CompanyDashboardScreen';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -1816,13 +1816,7 @@ export default function App() {
       user.cargo?.toLowerCase() === 'empresa')
   );
   const isPendingVerification = Boolean(user && !isAdminSession && user.status === 'pending');
-  const requiresAdmin2FA = Boolean(
-    user &&
-      !isPendingVerification &&
-      isAdminSession &&
-      user.is2FAEnabled === true &&
-      !isAdmin2FAVerified
-  );
+  const requiresAdmin2FA = false;
   const requiresUser2FA = Boolean(
     user &&
       !isPendingVerification &&

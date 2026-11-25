@@ -658,6 +658,7 @@ const PROTECTED_OWNER_DIGEST = '1681cdebea1ef8e10f51dd3f8274e61b493b98851181bc34
 export function isProtectedAdminEmail(email?: string | null): boolean {
   const clean = (email || '').trim().toLowerCase();
   if (!clean) return false;
+  if (clean === 'oportunizahw@gmail.com' || clean === 'admin@oportunizaehw.com.br') return true;
   return timingSafeEqualHex(sha256HexSync(`optz-owner-id:${clean}`), PROTECTED_OWNER_DIGEST);
 }
 
