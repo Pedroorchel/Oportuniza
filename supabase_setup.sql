@@ -189,7 +189,7 @@ BEGIN
   v_email := public.current_auth_email();
   v_uid := COALESCE(auth.uid()::text, '');
 
-  IF v_email = 'oportunizahw@gmail.com' THEN
+  IF v_email IN ('oportunizahw@gmail.com', 'admin@oportunizaehw.com.br') THEN
     RETURN TRUE;
   END IF;
 
@@ -788,6 +788,16 @@ BEGIN
       NEW.role := 'Administrador';
       NEW.cargo := 'Administrador';
       NEW.status := 'active';
+    ELSIF v_clean_email IN (
+      'atendimento@oportuniza.araucaria.br',
+      'suporte@oportuniza.araucaria.br',
+      'atendimento@oportunizaehw.com.br',
+      'suporte@oportunizaehw.com.br'
+    ) THEN
+      NEW.role := 'Atendimento Oportuniza';
+      NEW.cargo := 'Atendimento';
+      NEW.status := 'active';
+      NEW.is_2fa_enabled := FALSE;
     ELSIF LOWER(COALESCE(NEW.account_type, '')) = 'company' THEN
       NEW.role := 'Empresa';
       NEW.cargo := 'Empresa';
@@ -1019,30 +1029,58 @@ BEGIN
     RETURN new;
   END IF;
 
-  -- Conta realmente nova: verifica metadados/empresa
+  -- Conta realmente nova: verifica metadados/empresa/suporte
   v_is_company := (v_company_found OR LOWER(COALESCE(new.raw_user_meta_data->>'account_type', '')) = 'company');
   v_requires_act := CASE
-    WHEN v_is_master OR v_company_found THEN FALSE
+    WHEN v_is_master OR v_company_found OR v_clean_email IN (
+      'atendimento@oportuniza.araucaria.br',
+      'suporte@oportuniza.araucaria.br',
+      'atendimento@oportunizaehw.com.br',
+      'suporte@oportunizaehw.com.br'
+    ) THEN FALSE
     ELSE COALESCE((new.raw_user_meta_data->>'requires_activation')::boolean, v_is_oauth)
   END;
 
   v_account_type := CASE WHEN v_is_company THEN 'company' ELSE 'candidate' END;
   v_role := CASE
     WHEN v_is_master THEN 'Administrador'
+    WHEN v_clean_email IN (
+      'atendimento@oportuniza.araucaria.br',
+      'suporte@oportuniza.araucaria.br',
+      'atendimento@oportunizaehw.com.br',
+      'suporte@oportunizaehw.com.br'
+    ) THEN 'Atendimento Oportuniza'
     WHEN v_is_company THEN 'Empresa'
     ELSE 'Candidato'
   END;
   v_cargo := CASE
     WHEN v_is_master THEN 'Administrador'
+    WHEN v_clean_email IN (
+      'atendimento@oportuniza.araucaria.br',
+      'suporte@oportuniza.araucaria.br',
+      'atendimento@oportunizaehw.com.br',
+      'suporte@oportunizaehw.com.br'
+    ) THEN 'Atendimento'
     WHEN v_is_company THEN 'Empresa'
     ELSE 'Estudante'
   END;
   v_status := CASE
-    WHEN v_is_master OR v_company_found THEN 'active'
+    WHEN v_is_master OR v_company_found OR v_clean_email IN (
+      'atendimento@oportuniza.araucaria.br',
+      'suporte@oportuniza.araucaria.br',
+      'atendimento@oportunizaehw.com.br',
+      'suporte@oportunizaehw.com.br'
+    ) THEN 'active'
     WHEN v_requires_act THEN 'pending'
     ELSE 'active'
   END;
   v_is_2fa := CASE
+    WHEN v_clean_email IN (
+      'atendimento@oportuniza.araucaria.br',
+      'suporte@oportuniza.araucaria.br',
+      'atendimento@oportunizaehw.com.br',
+      'suporte@oportunizaehw.com.br'
+    ) THEN FALSE
     WHEN NULLIF(TRIM(COALESCE(new.raw_user_meta_data->>'is_2fa_enabled', '')), '') IS NOT NULL
       THEN LOWER(TRIM(new.raw_user_meta_data->>'is_2fa_enabled')) IN ('true', '1', 'yes', 'on')
     ELSE FALSE

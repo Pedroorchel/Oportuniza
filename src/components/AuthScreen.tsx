@@ -903,7 +903,12 @@ export default function AuthScreen({
               setLoginFailedAttempts(0);
               setLoginLockoutUntil(0);
               const localPref = resolveStored2FAPref(cleanEmail);
-              const resolved2FA = typeof localPref === 'boolean' ? localPref : true;
+              const resolved2FA =
+                typeof localPref === 'boolean'
+                  ? localPref
+                  : typeof serverCheck.profile.is2FAEnabled === 'boolean'
+                  ? serverCheck.profile.is2FAEnabled
+                  : false;
               setLoading(false);
               if (onLoginSuccess) {
                 onLoginSuccess({

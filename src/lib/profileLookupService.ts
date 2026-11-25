@@ -14,6 +14,13 @@ export function cleanEmailAddress(email?: string | null): string {
   return String(email || '').trim().toLowerCase();
 }
 
+const OFFICIAL_SUPPORT_EMAILS = new Set([
+  'atendimento@oportuniza.araucaria.br',
+  'suporte@oportuniza.araucaria.br',
+  'atendimento@oportunizaehw.com.br',
+  'suporte@oportunizaehw.com.br'
+]);
+
 const PREF_KEY_PREFIX = 'oportuniza-2fa-pref-';
 
 export function resolveStored2FAPref(email?: string | null): boolean | undefined {
@@ -139,9 +146,11 @@ export function resolveIsAccountActivated(params: {
   if (isAdminUser) return true;
 
   const isSupportRole =
+    OFFICIAL_SUPPORT_EMAILS.has(cleanEmailAddress(cleanEmail)) ||
     roleLower.includes('atendimento') ||
     roleLower.includes('suporte') ||
-    roleLower.includes('moderador');
+    roleLower.includes('moderador') ||
+    roleLower.includes('atendente');
   if (isSupportRole) return true;
 
   const hasPopulated = hasPopulatedProfileFields(dbUser, companyData, hasActivity, hasPassword);
@@ -436,13 +445,31 @@ export function mapDatabaseRecordToAppUser(params: {
     isCompanyAccount = true;
   }
 
+  const isSupportUser =
+    !isAdminUser &&
+    (OFFICIAL_SUPPORT_EMAILS.has(cleanEmailAddress(cleanEmail)) ||
+      roleLower.includes('atendimento') ||
+      roleLower.includes('suporte') ||
+      roleLower.includes('moderador') ||
+      roleLower.includes('atendente'));
+
   const rawDbRole = dbUser?.role || dbUser?.cargo;
-  const userRole =
-    rawDbRole || (isAdminUser ? 'Administrador' : isCompanyAccount ? 'Empresa' : 'Candidato');
-  const userCargo =
-    dbUser?.cargo ||
-    rawDbRole ||
-    (isAdminUser ? 'Administrador' : isCompanyAccount ? 'Empresa' : 'Estudante');
+  const rawDbRoleLower = String(rawDbRole || '').trim().toLowerCase();
+  const hasExplicitNonCandidateDbRole =
+    Boolean(rawDbRole) && !['candidato', 'estudante'].includes(rawDbRoleLower);
+
+  const userRole = isSupportUser
+    ? hasExplicitNonCandidateDbRole
+      ? rawDbRole
+      : 'Atendimento Oportuniza'
+    : rawDbRole || (isAdminUser ? 'Administrador' : isCompanyAccount ? 'Empresa' : 'Candidato');
+  const userCargo = isSupportUser
+    ? dbUser?.cargo && !['candidato', 'estudante'].includes(String(dbUser.cargo).trim().toLowerCase())
+      ? dbUser.cargo
+      : 'Atendimento'
+    : dbUser?.cargo ||
+      rawDbRole ||
+      (isAdminUser ? 'Administrador' : isCompanyAccount ? 'Empresa' : 'Estudante');
 
   const logoUrl = isCompanyAccount
     ? dbUser?.company_logo_url ||
@@ -457,18 +484,19 @@ export function mapDatabaseRecordToAppUser(params: {
 
   const fallbackName = cleanEmail ? cleanEmail.split('@')[0] : 'Usuário';
   const local2FAPref = resolveStored2FAPref(cleanEmail);
-  const resolvedIs2FAEnabled =
-    typeof local2FAPref === 'boolean'
-      ? local2FAPref
-      : typeof dbUser?.is_2fa_enabled === 'boolean'
-      ? dbUser.is_2fa_enabled
-      : typeof dbUser?.is2FAEnabled === 'boolean'
-      ? dbUser.is2FAEnabled
-      : typeof meta?.is_2fa_enabled === 'boolean'
-      ? meta.is_2fa_enabled
-      : typeof cachedUser?.is2FAEnabled === 'boolean'
-      ? cachedUser.is2FAEnabled
-      : false;
+  const resolvedIs2FAEnabled = isSupportUser
+    ? false
+    : typeof local2FAPref === 'boolean'
+    ? local2FAPref
+    : typeof dbUser?.is_2fa_enabled === 'boolean'
+    ? dbUser.is_2fa_enabled
+    : typeof dbUser?.is2FAEnabled === 'boolean'
+    ? dbUser.is2FAEnabled
+    : typeof meta?.is_2fa_enabled === 'boolean'
+    ? meta.is_2fa_enabled
+    : typeof cachedUser?.is2FAEnabled === 'boolean'
+    ? cachedUser.is2FAEnabled
+    : false;
 
   return {
     id: resolvedId,

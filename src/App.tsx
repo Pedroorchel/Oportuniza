@@ -781,8 +781,9 @@ export default function App() {
 
               const isAdminUser = Boolean(dbLoadedUser.isAdmin);
               const loadedTier = resolveUserHierarchyTier(dbLoadedUser);
-              const isPrivilegedLoaded = isAdminUser || loadedTier.id === 'support_service';
-              const requires2FAForLoaded = dbLoadedUser.is2FAEnabled === true;
+              const isSupportLoaded = loadedTier.id === 'support_service';
+              const isPrivilegedLoaded = isAdminUser || isSupportLoaded;
+              const requires2FAForLoaded = !isSupportLoaded && dbLoadedUser.is2FAEnabled === true;
               const verifiedForSession =
                 !requires2FAForLoaded ||
                 isSession2FAVerified(dbLoadedUser.id, dbLoadedUser.email, {
@@ -925,8 +926,9 @@ export default function App() {
                         isActivated: retryActivated
                       });
                       const retryTier = resolveUserHierarchyTier(retryUser);
-                      const retryPrivileged = Boolean(retryUser.isAdmin) || retryTier.id === 'support_service';
-                      const retryRequires2FA = retryUser.is2FAEnabled === true;
+                      const isRetrySupport = retryTier.id === 'support_service';
+                      const retryPrivileged = Boolean(retryUser.isAdmin) || isRetrySupport;
+                      const retryRequires2FA = !isRetrySupport && retryUser.is2FAEnabled === true;
                       const retryVerified =
                         !retryRequires2FA ||
                         isSession2FAVerified(retryUser.id, retryUser.email, {
@@ -1810,6 +1812,9 @@ export default function App() {
 
   const isPublicScreen = ['landing', 'bio', 'privacy', 'terms'].includes(currentScreen);
   const isAdminSession = Boolean(user?.isAdmin);
+  const isSupportSession = Boolean(
+    user && !isAdminSession && resolveUserHierarchyTier(user).id === 'support_service'
+  );
   const isCompanyAccount = Boolean(
     user &&
     (user.accountType === 'company' ||
@@ -1822,6 +1827,7 @@ export default function App() {
     user &&
       !isPendingVerification &&
       !isAdminSession &&
+      !isSupportSession &&
       currentScreen !== 'admin' &&
       user.is2FAEnabled === true &&
       !isLogin2FAVerified
@@ -1890,14 +1896,15 @@ export default function App() {
               defaultIsLogin={currentScreen !== 'register'}
               defaultIsRecover={currentScreen === 'recover'}
               onLoginSuccess={(loggedInUser) => {
+                const tier = resolveUserHierarchyTier(loggedInUser);
+                const isSupportUser = !loggedInUser.isAdmin && tier.id === 'support_service';
                 const nextUser: User = {
                   ...loggedInUser,
                   status: loggedInUser.status === 'pending' ? 'pending' : 'active',
-                  is2FAEnabled: Boolean(loggedInUser.is2FAEnabled)
+                  is2FAEnabled: isSupportUser ? false : Boolean(loggedInUser.is2FAEnabled)
                 };
-                const tier = resolveUserHierarchyTier(nextUser);
-                const isPrivilegedSession = Boolean(nextUser.isAdmin) || tier.id === 'support_service';
-                const requires2FA = nextUser.is2FAEnabled === true;
+                const isPrivilegedSession = Boolean(nextUser.isAdmin) || isSupportUser;
+                const requires2FA = !isSupportUser && nextUser.is2FAEnabled === true;
                 const verifiedNow =
                   !requires2FA ||
                   isSession2FAVerified(nextUser.id, nextUser.email, {
@@ -1934,14 +1941,15 @@ export default function App() {
               }}
               onSignOut={handleSignOut}
               onLoginSuccess={(loggedInUser) => {
+                const tier = resolveUserHierarchyTier(loggedInUser);
+                const isSupportUser = !loggedInUser.isAdmin && tier.id === 'support_service';
                 const nextUser: User = {
                   ...loggedInUser,
                   status: 'active',
-                  is2FAEnabled: Boolean(loggedInUser.is2FAEnabled)
+                  is2FAEnabled: isSupportUser ? false : Boolean(loggedInUser.is2FAEnabled)
                 };
-                const tier = resolveUserHierarchyTier(nextUser);
-                const isPrivilegedSession = Boolean(nextUser.isAdmin) || tier.id === 'support_service';
-                const requires2FA = nextUser.is2FAEnabled === true;
+                const isPrivilegedSession = Boolean(nextUser.isAdmin) || isSupportUser;
+                const requires2FA = !isSupportUser && nextUser.is2FAEnabled === true;
                 const verifiedNow =
                   !requires2FA ||
                   isSession2FAVerified(nextUser.id, nextUser.email, {
