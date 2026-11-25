@@ -12,6 +12,7 @@ import {
 } from './lib/profileLookupService';
 import { toast } from './lib/toast';
 import ToastContainer from './components/ToastContainer';
+import CookieConsentBanner from './components/CookieConsentBanner';
 import { isImageAssetUrl, resolveAssetUrl } from './lib/assets';
 
 // Import our modular subcomponents
@@ -1858,6 +1859,7 @@ export default function App() {
           
           {/* Global Notification Toast */}
           <ToastContainer />
+          <CookieConsentBanner onNavigate={handleScreenNavigation} />
 
           {/* Landing Screen */}
           {currentScreen === 'landing' && (

@@ -1,4 +1,5 @@
-import { ArrowLeft, Shield, FileText, Lock, Globe, Info, Scale, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, Shield, FileText, Lock, Globe, Info, Scale, CheckCircle2, AlertCircle, Cookie, Database, UserCheck, Eye, RefreshCw, HelpCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface LegalScreenProps {
@@ -8,232 +9,288 @@ interface LegalScreenProps {
 const logo = 'https://www.image2url.com/r2/default/images/1781824138816-3fd9702f-4521-41d2-8411-d8fc61114350.png';
 
 export function PrivacyPolicyScreen({ onBack }: LegalScreenProps) {
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 10 },
-    visible: { opacity: 1, y: 0 }
-  };
+  const [activeTab, setActiveTab] = useState<'privacy' | 'cookies'>('privacy');
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#F9FAFB] absolute inset-0 font-sans">
-      <header className="px-5 pt-8 pb-5 bg-white border-b border-gray-100 flex items-center justify-between shrink-0 sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-3">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-slate-100 absolute inset-0 z-50 font-sans selection:bg-emerald-500 selection:text-white">
+      <header className="px-6 pt-8 pb-5 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 sticky top-0 z-10 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-3.5">
           <button
             onClick={onBack}
-            className="p-2 rounded-xl hover:bg-gray-50 active:scale-95 transition-all text-gray-600 cursor-pointer border border-transparent hover:border-gray-100"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-slate-300 hover:text-white cursor-pointer border border-slate-700"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-sm font-bold text-gray-900 tracking-tight">Política de Privacidade</h1>
-            <p className="text-[9px] text-gray-400 font-medium">Atualizado em Junho 2026</p>
+            <h1 className="text-sm font-black text-white tracking-tight flex items-center gap-2">
+              <Shield className="w-4 h-4 text-emerald-400" /> Política de Privacidade & Proteção de Dados (LGPD)
+            </h1>
+            <p className="text-[10px] text-slate-400 font-medium">Conformidade com a Lei nº 13.709/2018 (LGPD) • Atualizado em Novembro de 2026</p>
           </div>
         </div>
-        <div className="w-16 h-16 rounded-xl overflow-hidden border border-gray-100 p-0 shadow-md bg-white flex items-center justify-center shrink-0">
-          <img src={logo} alt="Oportuniza" className="w-full h-full object-contain" />
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('privacy')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'privacy' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            Política Geral
+          </button>
+          <button
+            onClick={() => setActiveTab('cookies')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'cookies' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            Política de Cookies
+          </button>
         </div>
       </header>
 
-      <motion.div 
-        className="flex-1 overflow-y-auto px-5 py-6 space-y-7 custom-scroll"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <motion.section variants={itemVariants} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-2.5 mb-3.5">
-            <div className="p-2 bg-blue-50 rounded-xl">
-              <Shield className="w-4 h-4 text-blue-600" />
+      <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 max-w-4xl mx-auto w-full custom-scroll leading-relaxed">
+        {activeTab === 'privacy' ? (
+          <div className="space-y-8 animate-fadeIn">
+            {/* Introdução */}
+            <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Lock className="w-5 h-5 text-emerald-400" /> 1. Introdução e Compromisso com a Transparência
+              </h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                O portal <strong>Araucária Oportuniza</strong> ("Plataforma", "Nós", "Nosso") reconhece a importância da privacidade dos dados pessoais de seus usuários ("Candidatos", "Empresas", "Visitantes"). Esta Política de Privacidade explica detalhadamente como coletamos, usamos, armazenamos, compartilhamos e protegemos suas informações pessoais em total conformidade com a Constituição Federal da República Federativa do Brasil, o Marco Civil da Internet (Lei nº 12.965/2014) e a Lei Geral de Proteção de Dados Pessoais (LGPD - Lei nº 13.709/2018).
+              </p>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Ao utilizar nossa plataforma, criar contas ou enviar currículos e propostas de emprego, você declara estar ciente e de acordo com as práticas descritas neste documento. Caso não concorde com os termos, recomendamos que interrompa o uso do sistema imediatamente.
+              </p>
             </div>
-            <h2 className="text-[10px] font-bold text-gray-800 uppercase tracking-[0.1em] font-mono">Compromisso de Confiança</h2>
-          </div>
-          <p className="text-[12px] text-gray-500 leading-[1.6] font-medium">
-            Sua privacidade é o pilar da nossa relação. No Oportuniza, garantimos que seus dados sejam tratados com o máximo rigor de segurança e transparência.
-          </p>
-        </motion.section>
 
-        <motion.div variants={itemVariants} className="space-y-6 px-1">
-          <section>
-            <h3 className="text-[13px] font-bold text-gray-900 flex items-center gap-2 mb-2.5">
-              <span className="flex items-center justify-center w-5 h-5 bg-gray-900 text-white text-[10px] rounded-full font-mono">1</span>
-              Coleta de Dados
-            </h3>
-            <p className="text-[11px] text-gray-500 leading-relaxed pl-7">
-              Processamos apenas o necessário: informações de perfil (nome, e-mail), trajetórias profissionais e preferências para otimizar suas recomendações de carreira.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="text-[13px] font-bold text-gray-900 flex items-center gap-2 mb-2.5">
-              <span className="flex items-center justify-center w-5 h-5 bg-gray-900 text-white text-[10px] rounded-full font-mono">2</span>
-              Uso e Compartilhamento
-            </h3>
-            <p className="text-[11px] text-gray-500 leading-relaxed pl-7">
-              Seus dados nunca são vendidos. Eles são usados exclusivamente para conectar você a recrutadores e cursos, permitindo que a inteligência da plataforma trabalhe a seu favor.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="text-[13px] font-bold text-gray-900 flex items-center gap-2 mb-2.5">
-              <span className="flex items-center justify-center w-5 h-5 bg-gray-900 text-white text-[10px] rounded-full font-mono">3</span>
-              Seus Direitos
-            </h3>
-            <p className="text-[11px] text-gray-500 leading-relaxed pl-7">
-              Você tem total autonomia para acessar, corrigir ou solicitar a exclusão definitiva de seus dados a qualquer momento através do painel de configurações.
-            </p>
-          </section>
-        </motion.div>
-
-        <motion.section variants={itemVariants} className="p-5 bg-teal-50 rounded-2xl border border-teal-100 flex items-start gap-4">
-          <div className="p-2.5 bg-white rounded-xl shadow-sm">
-            <Lock className="w-4 h-4 text-teal-600" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <h4 className="text-[11px] font-bold text-teal-900 uppercase tracking-wide">Certificado LGPD</h4>
-              <CheckCircle2 className="w-3 h-3 text-teal-600" />
+            {/* Dados Coletados */}
+            <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-4">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Database className="w-5 h-5 text-cyan-400" /> 2. Quais Dados Pessoais Coletamos
+              </h2>
+              <p className="text-xs text-slate-300">
+                Coletamos apenas os dados estritamente necessários para viabilizar a empregabilidade municipal, divididos nas seguintes categorias:
+              </p>
+              <ul className="list-disc pl-5 space-y-2 text-xs text-slate-300">
+                <li><strong>Dados de Identificação:</strong> Nome completo, e-mail, número de telefone/WhatsApp, foto de perfil (avatar).</li>
+                <li><strong>Dados Profissionais e Acadêmicos (Candidatos):</strong> Histórico de experiências profissionais, formação educacional, competências técnicas, links para portfólio e currículo em texto ou arquivo.</li>
+                <li><strong>Dados Corporativos (Empresas):</strong> Razão social, CNPJ, nome do responsável de Recursos Humanos, cargo, segmento de atuação, bairro em Araucária e endereço comercial.</li>
+                <li><strong>Dados de Navegação e Sessão:</strong> Endereço IP, tipo de navegador, páginas acessadas, horários de acesso e registros de autenticação (tokens de sessão e preferências de 2FA).</li>
+              </ul>
             </div>
-            <p className="text-[10px] text-teal-700/80 leading-relaxed font-medium">
-              Operamos seguindo as diretrizes da Lei Geral de Proteção de Dados (Lei nº 13.709/2018), implementando criptografia de ponta a ponta em todas as transações de perfil.
-            </p>
-          </div>
-        </motion.section>
 
-        <motion.div variants={itemVariants} className="text-center pt-4 pb-8">
-          <p className="text-[10px] text-gray-400 font-medium">Dúvidas sobre seus dados?</p>
-          <button className="mt-2 text-[10px] font-bold text-primary hover:underline cursor-pointer">
-            contato@oportuniza.ai
-          </button>
-        </motion.div>
-      </motion.div>
+            {/* Finalidade do Tratamento */}
+            <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-4">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-emerald-400" /> 3. Finalidade e Base Legal para o Tratamento
+              </h2>
+              <p className="text-xs text-slate-300">
+                O tratamento de dados realizado pela plataforma fundamenta-se nas hipóteses legais previstas na LGPD (Art. 7º e 11º), especialmente para o cumprimento de obrigações contratuais, legítimo interesse e exercício regular de direitos em processos seletivos. As finalidades incluem:
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-1.5">
+                  <h3 className="text-xs font-bold text-emerald-400">Conexão Empregador-Candidato</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">Permitir que empresas visualizem currículos e iniciem conversas via WhatsApp ou e-mail.</p>
+                </div>
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-1.5">
+                  <h3 className="text-xs font-bold text-emerald-400">Qualificação Profissional</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">Gerenciar inscrições em trilhas de capacitação e acompanhar o progresso de aulas.</p>
+                </div>
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-1.5">
+                  <h3 className="text-xs font-bold text-emerald-400">Segurança da Informação</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">Prevenir fraudes, mitigar ataques cibernéticos e validar identidades com autenticação em duas etapas (2FA).</p>
+                </div>
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-1.5">
+                  <h3 className="text-xs font-bold text-emerald-400">Geoprocessamento Urbano</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">Posicionar sedes de empresas no mapa interativo para facilitar o planejamento de deslocamento do trabalhador.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Segurança e LGPD */}
+            <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-4">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Shield className="w-5 h-5 text-cyan-400" /> 4. Segurança de Armazenamento e Criptografia
+              </h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Utilizamos infraestrutura de ponta em nuvem fornecida pelo <strong>Supabase</strong> (PostgreSQL), protegida por políticas estritas de segurança em nível de linha (RLS - <em>Row Level Security</em>), chaves de API restritas, conexões criptografadas via SSL/TLS (HTTPS) e senhas armazenadas com algoritmos de *hashing* seguro (PBKDF2/SHA-256). Nenhum dado pessoal é comercializado ou alugado a terceiros em hipótese alguma.
+              </p>
+            </div>
+
+            {/* Direitos do Titular */}
+            <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-4">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Eye className="w-5 h-5 text-emerald-400" /> 5. Seus Direitos como Titular (Art. 18 da LGPD)
+              </h2>
+              <p className="text-xs text-slate-300">
+                Você possui direito absoluto de requisitar a qualquer momento:
+              </p>
+              <ul className="list-disc pl-5 space-y-2 text-xs text-slate-300">
+                <li>Confirmação da existência de tratamento de dados pessoais;</li>
+                <li>Acesso facilitado aos seus dados cadastrados;</li>
+                <li>Correção de dados incompletos, inexatos ou desatualizados;</li>
+                <li>Anonimização, bloqueio ou eliminação de dados desnecessários;</li>
+                <li>Revogação do consentimento e exclusão definitiva da conta e histórico.</li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-8 animate-fadeIn">
+            {/* Política de Cookies */}
+            <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-4">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Cookie className="w-5 h-5 text-emerald-400" /> Política de Cookies e Armazenamento Local
+              </h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Esta seção explica como o portal Araucária Oportuniza utiliza cookies e tecnologias similares de armazenamento local (como <em>localStorage</em> e <em>sessionStorage</em>) para reconhecer seu navegador, lembrar suas preferências de sessão e manter sua conta segura.
+              </p>
+
+              <div className="space-y-4 pt-2">
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-2">
+                  <h3 className="text-xs font-bold text-emerald-400">1. Cookies Estritamente Necessários (Essenciais)</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Indispensáveis para o funcionamento técnico do portal. Gerenciam o token de autenticação Supabase, o estado de login e a verificação de segurança 2FA. Sem estes, o site não opera corretamente.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-2">
+                  <h3 className="text-xs font-bold text-cyan-400">2. Cookies de Desempenho e Preferências</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Armazenam suas escolhas de navegação (como filtros de vagas, bairro selecionado e preferências de visualização) para otimizar seu tempo de busca por oportunidades.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-2">
+                  <h3 className="text-xs font-bold text-purple-400">3. Como Gerenciar ou Desativar Cookies</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Você pode configurar seu navegador da web (Chrome, Firefox, Safari, Edge) para recusar cookies ou alertá-lo quando forem enviados. Note que a desativação de cookies essenciais poderá impedir o login e a navegação segura na plataforma.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="text-center pt-4 pb-12 border-t border-slate-800">
+          <p className="text-xs text-slate-400">Dúvidas, solicitações ou denúncias relacionadas à LGPD?</p>
+          <a href="mailto:contato@oportuniza.araucaria.br" className="mt-1.5 inline-block text-xs font-bold text-emerald-400 hover:underline">
+            contato@oportuniza.araucaria.br
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
 
 export function TermsOfServiceScreen({ onBack }: LegalScreenProps) {
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, scale: 0.98 },
-    visible: { opacity: 1, scale: 1 }
-  };
-
   return (
-    <div className="w-full h-full flex flex-col bg-white absolute inset-0 font-sans">
-      <header className="px-5 pt-8 pb-5 border-b border-gray-100 flex items-center justify-between shrink-0 bg-white sticky top-0 z-10">
-        <div className="flex items-center gap-3">
+    <div className="w-full h-full flex flex-col bg-slate-950 text-slate-100 absolute inset-0 z-50 font-sans selection:bg-emerald-500 selection:text-white">
+      <header className="px-6 pt-8 pb-5 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 sticky top-0 z-10 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-3.5">
           <button
             onClick={onBack}
-            className="p-2 rounded-xl hover:bg-gray-50 active:scale-95 transition-all text-gray-600 cursor-pointer border border-transparent hover:border-gray-100"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-slate-300 hover:text-white cursor-pointer border border-slate-700"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <h1 className="text-sm font-bold text-gray-900 tracking-tight">Termos de Serviço</h1>
+          <div>
+            <h1 className="text-sm font-black text-white tracking-tight flex items-center gap-2">
+              <Scale className="w-4 h-4 text-emerald-400" /> Termos de Uso e Condições Gerais
+            </h1>
+            <p className="text-[10px] text-slate-400 font-medium">Contrato de Utilização do Portal • Araucária Oportuniza</p>
+          </div>
         </div>
-        <div className="px-2.5 py-1 bg-gray-950 rounded-lg">
-          <Scale className="w-3.5 h-3.5 text-white" />
+
+        <div className="w-12 h-12 rounded-xl overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center shrink-0 shadow-md">
+          <img src={logo} alt="Oportuniza" className="w-full h-full object-contain" />
         </div>
       </header>
 
-      <motion.div 
-        className="flex-1 overflow-y-auto px-6 py-8 space-y-8 custom-scroll"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <motion.div variants={itemVariants} className="space-y-4">
-          <div className="w-12 h-1 bg-primary/20 rounded-full" />
-          <h2 className="text-lg font-bold text-gray-900 leading-tight">Ao usar o Oportuniza, você aceita estas diretrizes.</h2>
-          <p className="text-[12px] text-gray-500 leading-relaxed">
-            Estes termos regem seu acesso e uso da plataforma. Leia atentamente para entender seus deveres e o que oferecemos.
+      <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 max-w-4xl mx-auto w-full custom-scroll leading-relaxed">
+        {/* Sumário Executivo */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="w-12 h-1 bg-emerald-500 rounded-full" />
+          <h2 className="text-base font-bold text-white">Ao acessar e utilizar o Araucária Oportuniza, você concorda integralmente com estes Termos.</h2>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Estes Termos de Serviço regulam o acesso e a utilização da plataforma web institucional e de empregabilidade do município de Araucária (PR). Leia atentamente todas as cláusulas antes de concluir seu cadastro como candidato ou empresa.
           </p>
-        </motion.div>
+        </div>
 
-        <motion.section variants={itemVariants} className="space-y-6">
-          <div className="flex gap-4">
-            <div className="shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-mono text-[10px] font-bold text-gray-900 border border-gray-200">
-              01
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-[13px] font-bold text-gray-900">Uso da Plataforma</h3>
-              <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
-                O Oportuniza é destinado ao crescimento pessoal e profissional. O uso para fins comerciais não autorizados ou automação abusiva (bots) resultará em suspensão imediata.
-              </p>
-            </div>
+        {/* Cláusula 1 */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-xs font-bold border border-emerald-500/30">01</span>
+            <h3 className="text-sm font-bold text-white">Natureza da Plataforma e Elegibilidade</h3>
           </div>
+          <p className="text-xs text-slate-300 leading-relaxed pl-10">
+            O <strong>Araucária Oportuniza</strong> é uma iniciativa digital integradora voltada a aproximar munícipes de oportunidades de emprego, estágio, menor aprendiz e cursos de capacitação profissional. Para utilizar os serviços, o usuário deve possuir capacidade civil plena ou estar devidamente assistido por responsável legal, fornecendo dados verídicos e válidos no momento do cadastro.
+          </p>
+        </div>
 
-          <div className="flex gap-4">
-            <div className="shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-mono text-[10px] font-bold text-gray-900 border border-gray-200">
-              02
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-[13px] font-bold text-gray-900">Veracidade de Dados</h3>
-              <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
-                Você é responsável por manter seu currículo e competências atualizados e honestos. Perfis com informações falsas degradam a experiência de todos.
-              </p>
-            </div>
+        {/* Cláusula 2 */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-xs font-bold border border-emerald-500/30">02</span>
+            <h3 className="text-sm font-bold text-white">Obrigações e Conduta do Candidato</h3>
           </div>
+          <p className="text-xs text-slate-300 leading-relaxed pl-10">
+            O candidato compromete-se a manter seu currículo e informações de contato (telefone/WhatsApp e e-mail) rigorosamente atualizados. É terminantemente proibido o envio de informações falsas, documentos adulterados, uso de linguagem ofensiva em candidaturas ou tentativa de engenharia social e ataques cibernéticos contra a plataforma.
+          </p>
+        </div>
 
-          <div className="flex gap-4">
-            <div className="shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-mono text-[10px] font-bold text-gray-900 border border-gray-200">
-              03
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-[13px] font-bold text-gray-900">Propriedade Intelectual</h3>
-              <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
-                Todo conteúdo educacional, logos e algoritmos são de propriedade exclusiva do Oportuniza ou seus licenciadores autorizados.
-              </p>
-            </div>
+        {/* Cláusula 3 */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-xs font-bold border border-emerald-500/30">03</span>
+            <h3 className="text-sm font-bold text-white">Responsabilidades das Empresas e Empregadores</h3>
           </div>
-        </motion.section>
+          <p className="text-xs text-slate-300 leading-relaxed pl-10">
+            As empresas cadastradas com CNPJ respondem civil e criminalmente pela veracidade das vagas anunciadas, salários informados, cumprimento das leis trabalhistas brasileiras (CLT) e leis de estágio. A publicação de vagas falsas, discriminatórias, enganosas ou com teor impróprio acarretará o banimento imediato da empresa do sistema e comunicação aos órgãos competentes.
+          </p>
+        </div>
 
-        <motion.div variants={itemVariants} className="p-5 rounded-2xl bg-amber-50/50 border border-amber-100 flex gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <h4 className="text-[11px] font-bold text-amber-900 uppercase">Limitação de Responsabilidade</h4>
-            <p className="text-[10px] text-amber-700/80 leading-relaxed font-medium">
-              Não garantimos a contratação imediata, pois o sucesso profissional depende também do empenho individual e da disponibilidade do mercado.
-            </p>
+        {/* Cláusula 4 */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-xs font-bold border border-emerald-500/30">04</span>
+            <h3 className="text-sm font-bold text-white">Propriedade Intelectual</h3>
           </div>
-        </motion.div>
+          <p className="text-xs text-slate-300 leading-relaxed pl-10">
+            Todos os direitos autorais, marcas registradas, códigos-fonte, algoritmos, layouts de interface, videoaulas e materiais didáticos disponibilizados no Oportuniza são protegidos por leis de propriedade intelectual. É vedada a reprodução, engenharia reversa ou distribuição comercial sem autorização expressa prévia.
+          </p>
+        </div>
 
-        <motion.footer variants={itemVariants} className="pt-6 pb-10 border-t border-gray-50 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">Status</span>
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                <span className="text-[10px] font-bold text-gray-900">Ativo</span>
-              </div>
-            </div>
-            <div className="w-px h-6 bg-gray-100" />
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">Região</span>
-              <span className="text-[10px] font-bold text-gray-900 flex items-center gap-1">
-                <Globe className="w-3 h-3" /> Brasil
-              </span>
-            </div>
+        {/* Cláusula 5 */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-xs font-bold border border-emerald-500/30">05</span>
+            <h3 className="text-sm font-bold text-white">Limitação de Responsabilidade</h3>
           </div>
-          <Info className="w-5 h-5 text-gray-200" />
-        </motion.footer>
-      </motion.div>
+          <p className="text-xs text-slate-300 leading-relaxed pl-10">
+            O Oportuniza atua como intermediário tecnológico facilitador da empregabilidade municipal. A plataforma não garante a contratação imediata de candidatos, visto que os processos seletivos são de decisão exclusiva das empresas contratantes. Não nos responsabilizamos por instabilidades decorrentes de falhas na operadora de internet do usuário ou força maior.
+          </p>
+        </div>
+
+        {/* Cláusula 6 */}
+        <div className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-xs font-bold border border-emerald-500/30">06</span>
+            <h3 className="text-sm font-bold text-white">Modificações dos Termos e Encerramento</h3>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed pl-10">
+            Reservamo-nos o direito de alterar estes Termos de Uso a qualquer momento para refletir melhorias tecnológicas ou exigências legais. O uso continuado da plataforma após as alterações constitui aceitação tácita da nova versão.
+          </p>
+        </div>
+
+        <div className="text-center pt-4 pb-12 border-t border-slate-800">
+          <p className="text-xs text-slate-400">Em caso de dúvidas sobre este contrato de utilização:</p>
+          <a href="mailto:suporte@oportuniza.araucaria.br" className="mt-1.5 inline-block text-xs font-bold text-emerald-400 hover:underline">
+            suporte@oportuniza.araucaria.br
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
