@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Pinyon+Script&family=Alex+Brush&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
-@import url('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, [data-theme="dark"], .dark *));
@@ -617,13 +616,18 @@ body {
   background-color: rgba(255, 255, 255, 0.06) !important;
 }
 
-/* Leaflet Map in Dark Mode */
+/* Leaflet Map Container & Dark Mode Popups (keep map tiles crisp & uninverted) */
+.leaflet-container {
+  background: #e2e8f0;
+  font-family: var(--font-sans);
+}
+
 .dark .leaflet-container, [data-theme="dark"] .leaflet-container {
-  background: #0B1120 !important;
+  background: #1e293b !important;
 }
 
 .dark .leaflet-tile, [data-theme="dark"] .leaflet-tile {
-  filter: brightness(0.8) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+  filter: none;
 }
 
 .dark .leaflet-popup-content-wrapper, [data-theme="dark"] .leaflet-popup-content-wrapper {

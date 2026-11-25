@@ -70,6 +70,33 @@ interface MapUpdaterProps {
 
 function MapUpdater({ center, zoom }: MapUpdaterProps) {
   const map = useMap();
+
+  useEffect(() => {
+    const refreshSize = () => {
+      try {
+        map.invalidateSize({ animate: false });
+      } catch {
+        // ignore unmounted map resize
+      }
+    };
+    refreshSize();
+    const t1 = window.setTimeout(refreshSize, 120);
+    const t2 = window.setTimeout(refreshSize, 360);
+
+    const container = map.getContainer();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && container) {
+      observer = new ResizeObserver(() => refreshSize());
+      observer.observe(container);
+    }
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      observer?.disconnect();
+    };
+  }, [map]);
+
   useEffect(() => {
     map.setView(center, zoom, { animate: true });
   }, [center[0], center[1], zoom, map]);
@@ -434,13 +461,18 @@ Dúvidas sobre como usar a plataforma, reportar erros ou enviar sugestões? Digi
         >
           {mapLayerMode === 'satellite' ? (
             <TileLayer
+              key="satellite"
               attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
             />
           ) : (
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              key="street"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+              subdomains="abcd"
+              maxZoom={20}
             />
           )}
           <MapUpdater center={mapCenter} zoom={mapZoom} />
@@ -750,7 +782,7 @@ Dúvidas sobre como usar a plataforma, reportar erros ou enviar sugestões? Digi
             </div>
 
             {/* FUNCTIONAL LEAFLET MAP */}
-            <div className="w-full h-80 sm:h-96 bg-slate-100 border border-gray-200 rounded-2xl relative overflow-hidden shrink-0 shadow-sm flex-none z-0">
+            <div className="w-full h-80 sm:h-96 min-h-[320px] sm:min-h-[384px] bg-slate-200 border border-gray-200 rounded-2xl relative overflow-hidden shrink-0 shadow-sm flex-none z-0">
               {renderMap()}
 
               {!selectedPartner && !selectedJob && (

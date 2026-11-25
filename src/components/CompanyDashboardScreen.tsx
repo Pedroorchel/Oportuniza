@@ -46,6 +46,33 @@ function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number
 
 function MapController({ center }: { center: [number, number] }) {
   const map = useMap();
+
+  useEffect(() => {
+    const refreshSize = () => {
+      try {
+        map.invalidateSize({ animate: false });
+      } catch {
+        // ignore unmounted map resize
+      }
+    };
+    refreshSize();
+    const t1 = window.setTimeout(refreshSize, 120);
+    const t2 = window.setTimeout(refreshSize, 360);
+
+    const container = map.getContainer();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && container) {
+      observer = new ResizeObserver(() => refreshSize());
+      observer.observe(container);
+    }
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      observer?.disconnect();
+    };
+  }, [map]);
+
   useEffect(() => {
     map.setView(center, map.getZoom());
   }, [center, map]);
@@ -1340,7 +1367,7 @@ export default function CompanyDashboardScreen({ user, onLogout, onUpdateUser }:
                 </div>
                 <p className="text-[11px] text-slate-400">Clique no mapa para marcar o endereço exato da empresa/vaga em Araucária.</p>
 
-                <div className="h-48 rounded-2xl overflow-hidden border border-slate-800 relative z-0">
+                <div className="h-48 min-h-[192px] rounded-2xl overflow-hidden border border-slate-800 relative z-0 bg-slate-200">
                   {(() => {
                     const safeLat = typeof jobLat === 'number' && !isNaN(jobLat) ? jobLat : -25.5859;
                     const safeLng = typeof jobLng === 'number' && !isNaN(jobLng) ? jobLng : -49.4047;
@@ -1353,8 +1380,10 @@ export default function CompanyDashboardScreen({ user, onLogout, onUpdateUser }:
                       >
                         <MapController center={[safeLat, safeLng]} />
                         <TileLayer
-                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                          subdomains="abcd"
+                          maxZoom={20}
                         />
                         <MapClickHandler onMapClick={(lat, lng) => {
                           setJobLat(lat);
@@ -1416,7 +1445,7 @@ export default function CompanyDashboardScreen({ user, onLogout, onUpdateUser }:
                 </button>
               </div>
             </div>
-            <div className="flex-1 relative z-0">
+            <div className="flex-1 min-h-[360px] relative z-0 bg-slate-200">
               {(() => {
                 const safeLat = typeof jobLat === 'number' && !isNaN(jobLat) ? jobLat : -25.5859;
                 const safeLng = typeof jobLng === 'number' && !isNaN(jobLng) ? jobLng : -49.4047;
@@ -1429,8 +1458,10 @@ export default function CompanyDashboardScreen({ user, onLogout, onUpdateUser }:
                   >
                     <MapController center={[safeLat, safeLng]} />
                     <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                      subdomains="abcd"
+                      maxZoom={20}
                     />
                     <MapClickHandler onMapClick={(lat, lng) => {
                       setJobLat(lat);
