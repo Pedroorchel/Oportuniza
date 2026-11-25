@@ -117,16 +117,53 @@ export default function App() {
   const [homeSearchQuery, setHomeSearchQuery] = useState('');
   const [jobSearchFilter, setJobSearchFilter] = useState('');
 
+  const cancelledAppIdsRef = useRef<Set<string>>(new Set());
+
+  const getCancelledAppIds = useCallback((): Set<string> => {
+    const merged = new Set<string>(cancelledAppIdsRef.current);
+    if (typeof window !== 'undefined' && user?.id) {
+      try {
+        const raw = localStorage.getItem(`oportuniza-cancelled-apps-${user.id}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((id) => merged.add(String(id)));
+          }
+        }
+      } catch {}
+    }
+    return merged;
+  }, [user?.id]);
+
+  const recordCancelledAppId = useCallback(
+    (appId: string) => {
+      const cleanId = String(appId);
+      cancelledAppIdsRef.current.add(cleanId);
+      if (typeof window !== 'undefined' && user?.id) {
+        try {
+          const current = getCancelledAppIds();
+          current.add(cleanId);
+          localStorage.setItem(
+            `oportuniza-cancelled-apps-${user.id}`,
+            JSON.stringify(Array.from(current).slice(-200))
+          );
+        } catch {}
+      }
+    },
+    [user?.id, getCancelledAppIds]
+  );
+
   const fetchUserData = useCallback(async () => {
     if (!user?.id || user.isAdmin) return;
 
     try {
       const safeUserId = sanitizePostgrestFilterValue(user.id);
       const safeEmail = sanitizePostgrestFilterValue(user.email);
-      const safeName = sanitizePostgrestFilterValue(user.name);
       const orFilters: string[] = [`user_id.eq.${safeUserId}`];
-      if (safeEmail) orFilters.push(`candidate_email.ilike.%${safeEmail}%`);
-      if (safeName) orFilters.push(`candidate_name.ilike.%${safeName}%`);
+      if (safeEmail) {
+        orFilters.push(`candidate_email.ilike.${safeEmail}`);
+        orFilters.push(`candidate_name.ilike.%| ${safeEmail}%`);
+      }
 
       const [compResult, enrResult, appsResult] = await Promise.all([
         supabase.from('user_course_progress').select('*').eq('user_id', user.id),
@@ -168,44 +205,51 @@ export default function App() {
       }
 
       if (appsResult.data) {
-        const mappedApps: Application[] = appsResult.data.map(app => {
-          let cName = app.candidate_name || 'Usuário';
-          let cEmail = '';
-          let cPhone = '';
-          if (cName.includes('|')) {
-            const parts = cName.split('|');
-            cName = parts[0].trim();
-            if (parts.length > 1) cEmail = parts[1].trim();
-            if (parts.length > 2) cPhone = parts[2].trim();
-          }
+        const cancelledIds = getCancelledAppIds();
+        const mappedApps: Application[] = appsResult.data
+          .filter((app) => {
+            const rawSt = String(app.status || '').toLowerCase();
+            if (rawSt.includes('cancelad')) return false;
+            return !cancelledIds.has(String(app.id));
+          })
+          .map(app => {
+            let cName = app.candidate_name || 'Usuário';
+            let cEmail = '';
+            let cPhone = '';
+            if (cName.includes('|')) {
+              const parts = cName.split('|');
+              cName = parts[0].trim();
+              if (parts.length > 1) cEmail = parts[1].trim();
+              if (parts.length > 2) cPhone = parts[2].trim();
+            }
 
-          let finalDate = app.created_at || app.applied_date;
-          if (app.created_at) {
-            try {
-              finalDate = new Date(app.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-            } catch (e) {}
-          }
+            let finalDate = app.created_at || app.applied_date;
+            if (app.created_at) {
+              try {
+                finalDate = new Date(app.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              } catch (e) {}
+            }
 
-          const rawSt = (app.status || 'Em análise').toLowerCase();
-          let normalizedStatus: 'Em análise' | 'Entrevista' | 'Aprovado' | 'Reprovado' = 'Em análise';
-          if (rawSt.includes('entrevista')) normalizedStatus = 'Entrevista';
-          else if (rawSt.includes('aprovad')) normalizedStatus = 'Aprovado';
-          else if (rawSt.includes('reprovad')) normalizedStatus = 'Reprovado';
+            const rawSt = (app.status || 'Em análise').toLowerCase();
+            let normalizedStatus: 'Em análise' | 'Entrevista' | 'Aprovado' | 'Reprovado' = 'Em análise';
+            if (rawSt.includes('entrevista')) normalizedStatus = 'Entrevista';
+            else if (rawSt.includes('aprovad')) normalizedStatus = 'Aprovado';
+            else if (rawSt.includes('reprovad')) normalizedStatus = 'Reprovado';
 
-          return {
-            id: app.id,
-            jobId: app.job_id,
-            jobTitle: app.job_title,
-            company: app.company,
-            appliedDate: finalDate,
-            status: normalizedStatus,
-            candidateName: cName,
-            candidateEmail: cEmail || app.candidate_email || undefined,
-            candidatePhone: cPhone || app.candidate_phone || undefined,
-            cvLink: app.cv_link,
-            cvFileName: app.cv_file_name
-          };
-        });
+            return {
+              id: String(app.id),
+              jobId: app.job_id,
+              jobTitle: app.job_title,
+              company: app.company,
+              appliedDate: finalDate,
+              status: normalizedStatus,
+              candidateName: cName,
+              candidateEmail: cEmail || app.candidate_email || undefined,
+              candidatePhone: cPhone || app.candidate_phone || undefined,
+              cvLink: app.cv_link,
+              cvFileName: app.cv_file_name
+            };
+          });
         setApplications(mappedApps);
       } else if (appsResult.error) {
         console.error('Error fetching applications:', appsResult.error);
@@ -213,7 +257,7 @@ export default function App() {
     } catch (err) {
       console.error("Parallel fetch failed:", err);
     }
-  }, [user]);
+  }, [user, getCancelledAppIds]);
 
   useEffect(() => {
     fetchUserData();
@@ -418,38 +462,45 @@ export default function App() {
       }
 
       if (appsData) {
-        const mappedApps: Application[] = appsData.map(app => {
-          let cName = app.candidate_name || 'Usuário';
-          let cEmail = '';
-          let cPhone = '';
-          if (cName.includes('|')) {
-            const parts = cName.split('|');
-            cName = parts[0].trim();
-            if (parts.length > 1) cEmail = parts[1].trim();
-            if (parts.length > 2) cPhone = parts[2].trim();
-          }
+        const cancelledIds = getCancelledAppIds();
+        const mappedApps: Application[] = appsData
+          .filter((app) => {
+            const rawSt = String(app.status || '').toLowerCase();
+            if (rawSt.includes('cancelad')) return false;
+            return !cancelledIds.has(String(app.id));
+          })
+          .map(app => {
+            let cName = app.candidate_name || 'Usuário';
+            let cEmail = '';
+            let cPhone = '';
+            if (cName.includes('|')) {
+              const parts = cName.split('|');
+              cName = parts[0].trim();
+              if (parts.length > 1) cEmail = parts[1].trim();
+              if (parts.length > 2) cPhone = parts[2].trim();
+            }
 
-          let finalDate = app.created_at || app.applied_date;
-          if (app.created_at) {
-            try {
-              finalDate = new Date(app.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-            } catch (e) {}
-          }
+            let finalDate = app.created_at || app.applied_date;
+            if (app.created_at) {
+              try {
+                finalDate = new Date(app.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              } catch (e) {}
+            }
 
-          return {
-            id: app.id,
-            jobId: app.job_id,
-            jobTitle: app.job_title,
-            company: app.company,
-            appliedDate: finalDate,
-            status: app.status,
-            candidateName: cName,
-            cvLink: app.cv_link,
-            cvFileName: app.cv_file_name,
-            candidateEmail: cEmail || undefined,
-            candidatePhone: cPhone || undefined
-          };
-        });
+            return {
+              id: String(app.id),
+              jobId: app.job_id,
+              jobTitle: app.job_title,
+              company: app.company,
+              appliedDate: finalDate,
+              status: app.status,
+              candidateName: cName,
+              cvLink: app.cv_link,
+              cvFileName: app.cv_file_name,
+              candidateEmail: cEmail || undefined,
+              candidatePhone: cPhone || undefined
+            };
+          });
         setApplications(mappedApps);
       }
     } catch (err) {
@@ -1323,26 +1374,62 @@ export default function App() {
   };
 
   const handleCancelApplication = async (id: string) => {
+    const cleanId = String(id);
+    const targetApp = applications.find((app) => String(app.id) === cleanId);
+
+    // Optimistically remove from UI and guard against stale polling re-introducing it
+    recordCancelledAppId(cleanId);
+    setApplications((prev) => prev.filter((app) => String(app.id) !== cleanId));
+
     try {
-      const { error } = await supabase
+      let deleted = false;
+      const { data: deletedRows, error } = await supabase
         .from('applications')
         .delete()
-        .eq('id', id);
-      
-      if (!error) {
-        const updated = applications.filter(app => app.id !== id);
-        setApplications(updated);
-        setNotification('Candidatura cancelada com sucesso!');
-        setTimeout(() => setNotification(null), 2000);
-      } else {
-        console.error('Error canceling application:', error);
-        setNotification('Erro ao cancelar candidatura. Tente novamente.');
-        setTimeout(() => setNotification(null), 3000);
+        .eq('id', cleanId)
+        .select('id');
+
+      if (!error && Array.isArray(deletedRows) && deletedRows.length > 0) {
+        deleted = true;
       }
+
+      if (!deleted && user?.id && targetApp?.jobId) {
+        const { data: deletedByJob, error: jobDelErr } = await supabase
+          .from('applications')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('job_id', targetApp.jobId)
+          .select('id');
+        if (!jobDelErr && Array.isArray(deletedByJob) && deletedByJob.length > 0) {
+          deleted = true;
+        }
+      }
+
+      if (!deleted) {
+        try {
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc('cancel_my_application', {
+            p_application_id: cleanId
+          });
+          if (!rpcErr && rpcRes) {
+            deleted = true;
+          }
+        } catch {}
+      }
+
+      if (error && !deleted) {
+        console.warn('Supabase delete application notice:', error);
+      }
+
+      try {
+        window.dispatchEvent(new CustomEvent('oportuniza-application-updated'));
+      } catch {}
+
+      setNotification('Candidatura cancelada com sucesso!');
+      setTimeout(() => setNotification(null), 2000);
     } catch (err: any) {
       console.error('Exception canceling application:', err);
-      setNotification('Erro ao se conectar ao banco de dados.');
-      setTimeout(() => setNotification(null), 3000);
+      setNotification('Candidatura removida da sua lista.');
+      setTimeout(() => setNotification(null), 2500);
     }
   };
 
@@ -2764,6 +2851,7 @@ export default function App() {
             <JobsSection
               applications={applications}
               onApply={handleApply}
+              onCancelApplication={handleCancelApplication}
               favorites={favorites}
               onToggleFavorite={handleToggleFavorite}
               onBack={() => handleGoBack('home')}

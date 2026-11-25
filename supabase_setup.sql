@@ -1292,8 +1292,40 @@ CREATE POLICY "apps_delete_owner_or_admin"
   TO authenticated
   USING (
     auth.uid()::text = user_id::text OR
+    (public.current_auth_email() <> '' AND LOWER(TRIM(COALESCE(candidate_email, ''))) = public.current_auth_email()) OR
     public.is_oportuniza_admin()
   );
+
+CREATE OR REPLACE FUNCTION public.cancel_my_application(p_application_id TEXT)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_uid TEXT;
+  v_email TEXT;
+  v_deleted INTEGER := 0;
+BEGIN
+  v_uid := COALESCE(auth.uid()::text, '');
+  v_email := public.current_auth_email();
+
+  IF v_uid = '' AND v_email = '' THEN
+    RETURN FALSE;
+  END IF;
+
+  DELETE FROM public.applications a
+  WHERE a.id::text = TRIM(COALESCE(p_application_id, ''))
+    AND (
+      (v_uid <> '' AND a.user_id::text = v_uid) OR
+      (v_email <> '' AND LOWER(TRIM(COALESCE(a.candidate_email, ''))) = v_email) OR
+      (v_email <> '' AND LOWER(COALESCE(a.candidate_name, '')) LIKE ('%| ' || v_email || '%')) OR
+      public.is_oportuniza_admin()
+    );
+
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  RETURN v_deleted > 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.cancel_my_application(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cancel_my_application(TEXT) TO authenticated;
 
 -- =====================================================================
 -- 8. RLS BLINDADO PARA INSCRIÇÕES EM CURSOS (public.enrollments)

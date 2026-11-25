@@ -1,11 +1,12 @@
-import { CheckCircle2, Briefcase, Calendar, ChevronRight, ArrowLeft, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, Briefcase, Calendar, ArrowLeft, XCircle } from 'lucide-react';
 import { Application } from '../types';
 
 interface ApplicationsSectionProps {
   applications: Application[];
   onNavigateToJobs: () => void;
   onBack: () => void;
-  onCancelApplication: (id: string) => void;
+  onCancelApplication: (id: string) => Promise<void> | void;
 }
 
 export default function ApplicationsSection({
@@ -14,6 +15,7 @@ export default function ApplicationsSection({
   onBack,
   onCancelApplication,
 }: ApplicationsSectionProps) {
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   return (
     <div className="w-full h-full flex flex-col bg-[#F9FAFB] absolute inset-0">
       {/* Header bar */}
@@ -164,12 +166,22 @@ export default function ApplicationsSection({
 
                 {/* Cancel Action */}
                 <div className="mt-2 pt-3 border-t border-gray-100 flex justify-end">
-                  <button 
-                    onClick={() => onCancelApplication(app.id)}
-                    className="flex items-center gap-1.5 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors text-[10px] font-bold cursor-pointer"
+                  <button
+                    type="button"
+                    disabled={cancellingId === String(app.id)}
+                    onClick={async () => {
+                      const appId = String(app.id);
+                      setCancellingId(appId);
+                      try {
+                        await onCancelApplication(appId);
+                      } finally {
+                        setCancellingId(null);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 text-red-500 hover:text-red-700 disabled:opacity-50 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors text-[10px] font-bold cursor-pointer"
                   >
                     <XCircle className="w-3.5 h-3.5" />
-                    Cancelar Candidatura
+                    {cancellingId === String(app.id) ? 'Cancelando...' : 'Cancelar Candidatura'}
                   </button>
                 </div>
               </div>

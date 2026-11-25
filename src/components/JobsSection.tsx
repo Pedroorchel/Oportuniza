@@ -20,6 +20,7 @@ import {
   Compass,
   BookmarkCheck,
   Gift,
+  XCircle,
 } from 'lucide-react';
 import { Job, Application } from '../types';
 import { mockJobs, loadJobsFromSupabase } from '../data';
@@ -29,6 +30,7 @@ import { resolveJobCoordinates } from '../lib/araucariaLocations';
 interface JobsSectionProps {
   applications: Application[];
   onApply: (job: Job) => void;
+  onCancelApplication?: (id: string) => Promise<void> | void;
   favorites: string[];
   onToggleFavorite: (id: string) => void;
   onBack: () => void;
@@ -87,6 +89,7 @@ const parseSalaryValue = (salary?: string): number => {
 
 export default function JobsSection({
   applications,
+  onCancelApplication,
   favorites,
   onToggleFavorite,
   onBack,
@@ -906,8 +909,19 @@ export default function JobsSection({
                           </div>
                         </div>
 
-                        {matchedJob && (
-                          <div className="pt-2 border-t border-gray-100 dark:border-slate-800 flex justify-end">
+                        <div className="pt-2 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                          {onCancelApplication ? (
+                            <button
+                              type="button"
+                              onClick={() => onCancelApplication(app.id)}
+                              className="flex items-center gap-1.5 text-red-600 dark:text-red-400 hover:text-red-700 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 px-3 py-1.5 rounded-lg transition-colors text-xs font-bold cursor-pointer"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              Cancelar Candidatura
+                            </button>
+                          ) : <span />}
+
+                          {matchedJob && (
                             <button
                               type="button"
                               onClick={() => onNavigateToDetailsJob(matchedJob)}
@@ -915,8 +929,8 @@ export default function JobsSection({
                             >
                               Ver detalhes da vaga
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </motion.div>
                     );
                   })}
