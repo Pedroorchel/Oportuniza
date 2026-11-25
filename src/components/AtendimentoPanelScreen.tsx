@@ -254,7 +254,7 @@ export default function AtendimentoPanelScreen({ user, onLogout, onNavigateHome,
   const handleCreateNewTicketSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTicketForm.user_name || !newTicketForm.subject || !newTicketForm.initial_message) {
-      alert('Por favor, preencha o nome do solicitante, o assunto e a mensagem.');
+      showToast('Por favor, preencha o nome do solicitante, o assunto e a mensagem.', 'warning');
       return;
     }
 
@@ -284,7 +284,7 @@ export default function AtendimentoPanelScreen({ user, onLogout, onNavigateHome,
       await loadTicketsData();
       setSelectedTicketId(ticket.id);
     } catch (err: any) {
-      alert(`Erro ao criar chamado: ${err.message || 'Erro desconhecido'}`);
+      showToast(`Erro ao criar chamado: ${err.message || 'Erro desconhecido'}`, 'warning');
     }
   };
 

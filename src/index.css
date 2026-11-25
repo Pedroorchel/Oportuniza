@@ -479,6 +479,7 @@ body {
 .dark .bg-\[\#F8F9FB\], [data-theme="dark"] .bg-\[\#F8F9FB\],
 .dark .bg-\[\#F8FAFC\], [data-theme="dark"] .bg-\[\#F8FAFC\],
 .dark .bg-\[\#F8F9FA\], [data-theme="dark"] .bg-\[\#F8F9FA\],
+.dark .bg-\[\#F4F7FA\], [data-theme="dark"] .bg-\[\#F4F7FA\],
 .dark .bg-slate-50, [data-theme="dark"] .bg-slate-50,
 .dark .bg-gray-50, [data-theme="dark"] .bg-gray-50 {
   background-color: #0B1120 !important;

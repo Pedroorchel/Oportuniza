@@ -64,7 +64,13 @@ export default function SettingsScreen({
   const [theme, toggleTheme] = useTheme();
 
   // Notification states
-  const [tiJobsPush, setTiJobsPush] = useState<boolean>(user?.tiJobsPushEnabled ?? false);
+  const [tiJobsPush, setTiJobsPush] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && user?.id) {
+      const stored = localStorage.getItem(`oportuniza-ti-push-${user.id}`);
+      if (stored !== null) return stored === 'true';
+    }
+    return user?.tiJobsPushEnabled ?? false;
+  });
   const [generalNotifications, setGeneralNotifications] = useState<boolean>(user?.notificationsEnabled ?? true);
   const [marketingEmails, setMarketingEmails] = useState<boolean>(user?.marketingEmailsEnabled ?? false);
   const [courseAlerts, setCourseAlerts] = useState<boolean>(true);
@@ -95,7 +101,8 @@ export default function SettingsScreen({
   // Synchronize state with user prop
   useEffect(() => {
     if (user) {
-      setTiJobsPush(user.tiJobsPushEnabled ?? false);
+      const storedTi = user.id ? localStorage.getItem(`oportuniza-ti-push-${user.id}`) : null;
+      setTiJobsPush(storedTi !== null ? storedTi === 'true' : (user.tiJobsPushEnabled ?? false));
       setGeneralNotifications(user.notificationsEnabled ?? true);
       setMarketingEmails(user.marketingEmailsEnabled ?? false);
       setIs2FAEnabled(Boolean(user.is2FAEnabled));
@@ -145,26 +152,17 @@ export default function SettingsScreen({
     }
 
     if (user) {
+      if (user.id) {
+        try {
+          localStorage.setItem(`oportuniza-ti-push-${user.id}`, String(enabled));
+        } catch {}
+      }
       const updatedUser: User = {
         ...user,
         tiJobsPushEnabled: enabled,
         updatedAt: new Date().toISOString()
       };
       onSetUser(updatedUser);
-
-      try {
-        if (user.id) {
-          await supabase
-            .from('users')
-            .update({
-              notifications_enabled: enabled,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', user.id);
-        }
-      } catch (err) {
-        console.warn('Supabase sync warning:', err);
-      }
     }
 
     if (enabled) {

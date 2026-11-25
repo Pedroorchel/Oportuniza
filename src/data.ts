@@ -1,6 +1,7 @@
 import { Job, Course } from './types';
 import { supabase } from './lib/supabaseClient';
 import { resolveAssetUrl } from './lib/assets';
+import { GeoPoint, resolveJobCoordinates } from './lib/araucariaLocations';
 
 function safeSetLocalStorage(key: string, value: string): void {
   try {
@@ -13,8 +14,11 @@ function safeSetLocalStorage(key: string, value: string): void {
 }
 
 function normalizeJobAssets(job: Job): Job {
+  const coords = resolveJobCoordinates(job, SEED_JOB_COORDS_BY_ID);
   return {
     ...job,
+    lat: coords.lat,
+    lng: coords.lng,
     logo: job.logo ? resolveAssetUrl(job.logo) : job.logo,
     companyLogoUrl: job.companyLogoUrl ? resolveAssetUrl(job.companyLogoUrl) : job.companyLogoUrl,
   };
@@ -37,8 +41,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Centro',
-    lat: -25.5912,
-    lng: -49.4150,
+    lat: -25.5865,
+    lng: -49.4055,
     logo: '/assets/images/logo_farmabem_1793965852222.jpg',
     dateString: 'Hoje',
     color: 'border-l-blue-500'
@@ -59,8 +63,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Polo Industrial / Petrobras',
-    lat: -25.5650,
-    lng: -49.3850,
+    lat: -25.5718,
+    lng: -49.3752,
     logo: '/assets/images/logo_metalika_1793965852486.jpg',
     dateString: 'Ontem',
     color: 'border-l-blue-500'
@@ -80,8 +84,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Fazenda Velha',
-    lat: -25.5780,
-    lng: -49.4250,
+    lat: -25.5742,
+    lng: -49.4058,
     logo: '/assets/images/logo_clinica_vida_1793965854270.jpg',
     dateString: '2 dias atrás',
     color: 'border-l-blue-500'
@@ -101,8 +105,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Costeira',
-    lat: -25.5650,
-    lng: -49.4020,
+    lat: -25.5938,
+    lng: -49.3749,
     logo: '/assets/images/logo_super_sul_1793965854342.jpg',
     dateString: '3 dias atrás',
     color: 'border-l-red-500'
@@ -123,8 +127,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Thomaz Coelho',
-    lat: -25.5450,
-    lng: -49.4100,
+    lat: -25.5424,
+    lng: -49.3556,
     logo: '/assets/images/logo_logistica_rapida_1793965855652.jpg',
     dateString: '5 dias atrás',
     color: 'border-l-blue-500'
@@ -145,8 +149,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'Jovem Aprendiz',
     isRemote: false,
     location: 'Araucária - Capela Velha',
-    lat: -25.6100,
-    lng: -49.3900,
+    lat: -25.5518,
+    lng: -49.3935,
     logo: 'https://ui-avatars.com/api/?name=NX&background=10b981&color=fff&size=128&bold=true',
     dateString: '6 dias atrás',
     color: 'border-l-blue-500'
@@ -167,8 +171,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'Estágio',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.4450,
-    lng: -49.2650,
+    lat: -25.4295,
+    lng: -49.2712,
     logo: 'https://ui-avatars.com/api/?name=TR&background=6366f1&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-purple-500'
@@ -189,8 +193,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'Estágio',
     isRemote: true,
     location: 'Curitiba - PR (Remoto)',
-    lat: -25.5100,
-    lng: -49.2350,
+    lat: -25.4426,
+    lng: -49.2865,
     logo: 'https://ui-avatars.com/api/?name=AC&background=ec4899&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-pink-500'
@@ -211,8 +215,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'Estágio',
     isRemote: false,
     location: 'Araucária - PR',
-    lat: -25.5980,
-    lng: -49.4250,
+    lat: -25.5882,
+    lng: -49.4072,
     logo: '/assets/images/logo_csn_araucaria_1793965855603.jpg',
     dateString: '2 dias atrás',
     color: 'border-l-teal-500'
@@ -233,8 +237,8 @@ const DEFAULT_JOBS: Job[] = [
     type: 'Estágio',
     isRemote: false,
     location: 'Araucária - PR',
-    lat: -25.5680,
-    lng: -49.3820,
+    lat: -25.5736,
+    lng: -49.3788,
     logo: '/assets/images/logo_metalika_1793965852486.jpg',
     dateString: '4 dias atrás',
     color: 'border-l-orange-500'
@@ -257,8 +261,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - PR',
-    lat: -25.5780,
-    lng: -49.4050,
+    lat: -25.5685,
+    lng: -49.3955,
     logo: '/assets/images/logo_berneck_1793965852701.jpg',
     dateString: 'Hoje',
     color: 'border-l-indigo-500',
@@ -279,8 +283,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.4280,
-    lng: -49.2680,
+    lat: -25.4282,
+    lng: -49.2738,
     logo: 'https://ui-avatars.com/api/?name=IT&background=06b6d4&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-cyan-500',
@@ -301,8 +305,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - PR',
-    lat: -25.5900,
-    lng: -49.4120,
+    lat: -25.5848,
+    lng: -49.4028,
     logo: 'https://ui-avatars.com/api/?name=MG&background=f97316&color=fff&size=128&bold=true',
     dateString: '2 dias atrás',
     color: 'border-l-orange-500',
@@ -323,8 +327,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.4320,
-    lng: -49.2780,
+    lat: -25.4375,
+    lng: -49.2485,
     logo: 'https://ui-avatars.com/api/?name=BP&background=e11d48&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-rose-500',
@@ -345,8 +349,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - PR',
-    lat: -25.5620,
-    lng: -49.3750,
+    lat: -25.5442,
+    lng: -49.3584,
     logo: 'https://ui-avatars.com/api/?name=MV&background=ea580c&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-orange-600',
@@ -367,8 +371,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.4550,
-    lng: -49.2900,
+    lat: -25.4135,
+    lng: -49.2595,
     logo: 'https://ui-avatars.com/api/?name=BF&background=a855f7&color=fff&size=128&bold=true',
     dateString: '3 dias atrás',
     color: 'border-l-purple-500',
@@ -388,8 +392,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'Estágio',
     isRemote: false,
     location: 'Araucária - PR',
-    lat: -25.5910,
-    lng: -49.4180,
+    lat: -25.5874,
+    lng: -49.4036,
     logo: 'https://ui-avatars.com/api/?name=CP&background=10b981&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-emerald-500',
@@ -409,8 +413,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Curitiba - PR',
-    lat: -25.4200,
-    lng: -49.2700,
+    lat: -25.4188,
+    lng: -49.2686,
     logo: 'https://ui-avatars.com/api/?name=TS&background=10b981&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-blue-500',
@@ -430,8 +434,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.4300,
-    lng: -49.2800,
+    lat: -25.4519,
+    lng: -49.2814,
     logo: 'https://ui-avatars.com/api/?name=RC&background=f59e0b&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-orange-500',
@@ -451,8 +455,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.4400,
-    lng: -49.2900,
+    lat: -25.4422,
+    lng: -49.2869,
     logo: 'https://ui-avatars.com/api/?name=DI&background=8b5cf6&color=fff&size=128&bold=true',
     dateString: '2 dias atrás',
     color: 'border-l-purple-500',
@@ -472,8 +476,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'Estágio',
     isRemote: true,
     location: 'Curitiba - PR',
-    lat: -25.4500,
-    lng: -49.3000,
+    lat: -25.4498,
+    lng: -49.2572,
     logo: 'https://ui-avatars.com/api/?name=AM&background=06b6d4&color=fff&size=128&bold=true',
     dateString: '3 dias atrás',
     color: 'border-l-cyan-500',
@@ -493,8 +497,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.4600,
-    lng: -49.3100,
+    lat: -25.4284,
+    lng: -49.2733,
     logo: 'https://ui-avatars.com/api/?name=WS&background=ec4899&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-pink-500',
@@ -514,8 +518,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.4700,
-    lng: -49.3200,
+    lat: -25.4766,
+    lng: -49.2916,
     logo: 'https://ui-avatars.com/api/?name=ES&background=3b82f6&color=fff&size=128&bold=true',
     dateString: '4 dias atrás',
     color: 'border-l-blue-600',
@@ -535,8 +539,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.4800,
-    lng: -49.3300,
+    lat: -25.5852,
+    lng: -49.4062,
     logo: 'https://ui-avatars.com/api/?name=CS&background=14b8a6&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-teal-500',
@@ -556,8 +560,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'Estágio',
     isRemote: true,
     location: 'Curitiba - PR',
-    lat: -25.4900,
-    lng: -49.3400,
+    lat: -25.4980,
+    lng: -49.3290,
     logo: 'https://ui-avatars.com/api/?name=QT&background=8b5cf6&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-violet-500',
@@ -577,8 +581,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.5000,
-    lng: -49.3500,
+    lat: -25.4148,
+    lng: -49.2598,
     logo: 'https://ui-avatars.com/api/?name=DF&background=eab308&color=fff&size=128&bold=true',
     dateString: '2 dias atrás',
     color: 'border-l-yellow-500',
@@ -598,8 +602,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.5100,
-    lng: -49.3600,
+    lat: -25.4445,
+    lng: -49.2895,
     logo: 'https://ui-avatars.com/api/?name=CD&background=f97316&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-orange-500',
@@ -619,8 +623,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.5200,
-    lng: -49.3700,
+    lat: -25.4512,
+    lng: -49.2588,
     logo: 'https://ui-avatars.com/api/?name=MT&background=3b82f6&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-blue-500',
@@ -640,8 +644,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.5300,
-    lng: -49.3800,
+    lat: -25.4955,
+    lng: -49.3250,
     logo: 'https://ui-avatars.com/api/?name=IM&background=64748b&color=fff&size=128&bold=true',
     dateString: '3 dias atrás',
     color: 'border-l-slate-500',
@@ -661,8 +665,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.5400,
-    lng: -49.3900,
+    lat: -25.5868,
+    lng: -49.4024,
     logo: 'https://ui-avatars.com/api/?name=DB&background=22c55e&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-green-500',
@@ -682,8 +686,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: true,
     location: 'Remoto',
-    lat: -25.5500,
-    lng: -49.4000,
+    lat: -25.4310,
+    lng: -49.2705,
     logo: 'https://ui-avatars.com/api/?name=WS&background=8b5cf6&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-purple-500',
@@ -703,8 +707,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Curitiba - PR',
-    lat: -25.5600,
-    lng: -49.4100,
+    lat: -25.4538,
+    lng: -49.2830,
     logo: 'https://ui-avatars.com/api/?name=SS&background=4f46e5&color=fff&size=128&bold=true',
     dateString: '2 dias atrás',
     color: 'border-l-indigo-500',
@@ -725,8 +729,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Costeira',
-    lat: -25.5680,
-    lng: -49.4010,
+    lat: -25.5945,
+    lng: -49.3738,
     logo: '/assets/images/logo_metalika_1793965852486.jpg',
     dateString: 'Hoje',
     color: 'border-l-blue-600',
@@ -747,8 +751,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Thomaz Coelho',
-    lat: -25.5480,
-    lng: -49.4120,
+    lat: -25.5415,
+    lng: -49.3542,
     logo: '/assets/images/logo_berneck_1793965852701.jpg',
     dateString: 'Ontem',
     color: 'border-l-emerald-600',
@@ -769,8 +773,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Centro',
-    lat: -25.5920,
-    lng: -49.4160,
+    lat: -25.5862,
+    lng: -49.4040,
     logo: '/assets/images/logo_csn_araucaria_1793965855603.jpg',
     dateString: 'Hoje',
     color: 'border-l-teal-600',
@@ -791,8 +795,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Polo Petrobras',
-    lat: -25.5630,
-    lng: -49.3840,
+    lat: -25.5720,
+    lng: -49.3750,
     logo: 'https://ui-avatars.com/api/?name=RP&background=0284c7&color=fff&size=128&bold=true',
     dateString: 'Hoje',
     color: 'border-l-sky-600',
@@ -813,8 +817,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Campina da Barra',
-    lat: -25.5840,
-    lng: -49.4080,
+    lat: -25.6215,
+    lng: -49.3686,
     logo: 'https://ui-avatars.com/api/?name=AT&background=f59e0b&color=fff&size=128&bold=true',
     dateString: 'Ontem',
     color: 'border-l-amber-500',
@@ -835,8 +839,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'Estágio',
     isRemote: false,
     location: 'Araucária - Fazenda Velha',
-    lat: -25.5760,
-    lng: -49.4230,
+    lat: -25.5738,
+    lng: -49.4046,
     logo: '/assets/images/logo_metalika_1793965852486.jpg',
     dateString: 'Hoje',
     color: 'border-l-indigo-600',
@@ -857,8 +861,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Iguaçu',
-    lat: -25.5890,
-    lng: -49.4180,
+    lat: -25.6032,
+    lng: -49.3870,
     logo: 'https://ui-avatars.com/api/?name=DA&background=16a34a&color=fff&size=128&bold=true',
     dateString: '2 dias atrás',
     color: 'border-l-green-600',
@@ -879,8 +883,8 @@ const NEW_JOBS: Omit<Job, 'id'>[] = [
     type: 'CLT',
     isRemote: false,
     location: 'Araucária - Tindiquera',
-    lat: -25.5980,
-    lng: -49.4110,
+    lat: -25.5762,
+    lng: -49.3617,
     logo: 'https://ui-avatars.com/api/?name=US&background=0d9488&color=fff&size=128&bold=true',
     dateString: '3 dias atrás',
     color: 'border-l-teal-500',
@@ -1256,6 +1260,21 @@ const DEFAULT_COURSES: Course[] = [
   }
 ];
 
+const SEED_JOB_COORDS_BY_ID: Map<string, GeoPoint> = (() => {
+  const map = new Map<string, GeoPoint>();
+  DEFAULT_JOBS.forEach(j => {
+    if (typeof j.lat === 'number' && typeof j.lng === 'number') {
+      map.set(j.id, { lat: j.lat, lng: j.lng });
+    }
+  });
+  NEW_JOBS.forEach((nj, idx) => {
+    if (typeof nj.lat === 'number' && typeof nj.lng === 'number') {
+      map.set(`job-new-p${idx + 1}`, { lat: nj.lat, lng: nj.lng });
+    }
+  });
+  return map;
+})();
+
 export const mockJobs: Job[] = (() => {
   try {
     const saved = localStorage.getItem('oportuniza-admin-jobs');
@@ -1329,39 +1348,43 @@ export const loadJobsFromSupabase = async (): Promise<boolean> => {
       return false;
     }
 
-    const mappedJobs: Job[] = (data || []).map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      company: item.company || item.company_name,
-      category: item.category || 'Geral',
-      description: item.description,
-      requirements: Array.isArray(item.requirements) ? item.requirements : (item.requirements ? [item.requirements] : []),
-      salary: item.salary,
-      type: item.type,
-      isRemote: item.isRemote !== false,
-      location: item.location,
-      lat: item.lat,
-      lng: item.lng,
-      logo: resolveAssetUrl(item.logo || item.company_logo_url || 'Briefcase'),
-      dateString: item.dateString || item.posted_date || 'Hoje',
-      color: item.color,
-      active: item.active !== false,
-      startDate: item.startDate || item.start_date || undefined,
-      endDate: item.endDate || item.end_date || undefined,
-      workHours: item.workHours || item.work_hours || undefined,
-      companyAddress: item.companyAddress || item.company_address || undefined,
-      companyNeighborhood: item.companyNeighborhood || item.company_neighborhood || undefined,
-      companyContactPhone: item.companyContactPhone || item.company_contact_phone || undefined,
-      companyContactEmail: item.companyContactEmail || item.company_contact_email || undefined,
-      companyResponsibleName: item.companyResponsibleName || item.company_responsible_name || undefined,
-      companyResponsibleRole: item.companyResponsibleRole || item.company_responsible_role || undefined,
-      companyLogoUrl: item.companyLogoUrl || item.company_logo_url || item.logo ? resolveAssetUrl(item.companyLogoUrl || item.company_logo_url || item.logo) : undefined,
-      cnpj: item.cnpj || undefined,
-      approvalStatus: item.approvalStatus || item.approval_status || (item.company?.includes('FarmaBem') || item.company?.includes('Indústria') ? 'accepted' : 'accepted'),
-      approvedBy: item.approvedBy || item.approved_by || undefined,
-      approvedAt: item.approvedAt || item.approved_at || undefined,
-      acceptedCandidatesCount: item.acceptedCandidatesCount || item.accepted_candidates_count || 0
-    }));
+    const mappedJobs: Job[] = (data || []).map((item: any) => {
+      const baseJob: Job = {
+        id: item.id,
+        title: item.title,
+        company: item.company || item.company_name,
+        category: item.category || 'Geral',
+        description: item.description,
+        requirements: Array.isArray(item.requirements) ? item.requirements : (item.requirements ? [item.requirements] : []),
+        benefits: Array.isArray(item.benefits) ? item.benefits : (item.benefits ? [item.benefits] : []),
+        salary: item.salary,
+        type: item.type,
+        isRemote: typeof item.is_remote === 'boolean' ? item.is_remote : typeof item.isRemote === 'boolean' ? item.isRemote : false,
+        location: item.location,
+        lat: item.lat,
+        lng: item.lng,
+        logo: resolveAssetUrl(item.logo || item.company_logo_url || 'Briefcase'),
+        dateString: item.dateString || item.posted_date || 'Hoje',
+        color: item.color,
+        active: item.active !== false,
+        startDate: item.startDate || item.start_date || undefined,
+        endDate: item.endDate || item.end_date || undefined,
+        workHours: item.workHours || item.work_hours || undefined,
+        companyAddress: item.companyAddress || item.company_address || undefined,
+        companyNeighborhood: item.companyNeighborhood || item.company_neighborhood || undefined,
+        companyContactPhone: item.companyContactPhone || item.company_contact_phone || undefined,
+        companyContactEmail: item.companyContactEmail || item.company_contact_email || undefined,
+        companyResponsibleName: item.companyResponsibleName || item.company_responsible_name || undefined,
+        companyResponsibleRole: item.companyResponsibleRole || item.company_responsible_role || undefined,
+        companyLogoUrl: (item.companyLogoUrl || item.company_logo_url || item.logo) ? resolveAssetUrl(item.companyLogoUrl || item.company_logo_url || item.logo) : undefined,
+        cnpj: item.cnpj || undefined,
+        approvalStatus: item.approvalStatus || item.approval_status || 'accepted',
+        approvedBy: item.approvedBy || item.approved_by || undefined,
+        approvedAt: item.approvedAt || item.approved_at || undefined,
+        acceptedCandidatesCount: item.acceptedCandidatesCount || item.accepted_candidates_count || 0
+      };
+      return normalizeJobAssets(baseJob);
+    });
 
     // Add fetched items to the map (fetched items take precedence over local items with the same ID)
     mappedJobs.forEach(j => {
@@ -1513,7 +1536,7 @@ export const loadCoursesFromSupabase = async (): Promise<boolean> => {
         rating: Number(item.rating || 5.0),
         level: item.level,
         logo: item.logo,
-        coverImage: item.coverImage,
+        coverImage: item.cover_image || item.coverImage || '',
         lessons: Array.isArray(item.lessons) ? item.lessons : [],
         completed: item.completed === true,
         active: item.active !== false
@@ -1556,12 +1579,14 @@ export const loadCoursesFromSupabase = async (): Promise<boolean> => {
         rating: c.rating,
         level: c.level,
         logo: c.logo || '',
-        coverImage: c.coverImage || '',
+        cover_image: c.coverImage || '',
         lessons: c.lessons,
-        completed: c.completed || false,
         active: c.active !== false
       }));
-      await supabase.from('courses').upsert(recordsToUpsert);
+      const { error: upsertCourseErr } = await supabase.from('courses').upsert(recordsToUpsert);
+      if (upsertCourseErr) {
+        console.warn('Courses upsert warning:', upsertCourseErr.message);
+      }
     }
 
     mockCourses.length = 0;
@@ -1611,13 +1636,15 @@ export const saveAdminJobs = async (jobs: Job[]) => {
   window.dispatchEvent(new Event('oportuniza-jobs-changed'));
 
   try {
-    // Delete in supabase for items NOT in the incoming array to simulate synced deletes
-    const ids = jobs.map(j => j.id);
-    if (ids.length > 0) {
-      const formattedIds = `'${ids.join("','")}'`;
-      await supabase.from('jobs').delete().filter('id', 'not.in', `(${formattedIds})`);
-    } else {
-      await supabase.from('jobs').delete().neq('id', 'temp_placeholder_dummy');
+    const keepIds = new Set(jobs.map(j => j.id));
+    const { data: existingRows } = await supabase.from('jobs').select('id');
+    if (Array.isArray(existingRows)) {
+      const removedIds = existingRows
+        .map((r: any) => r.id)
+        .filter((id: string) => id && !keepIds.has(id));
+      if (removedIds.length > 0) {
+        await supabase.from('jobs').delete().in('id', removedIds);
+      }
     }
 
     if (jobs.length > 0) {
@@ -1625,36 +1652,39 @@ export const saveAdminJobs = async (jobs: Job[]) => {
         id: j.id,
         title: j.title,
         company: j.company,
-        category: j.category,
+        company_name: j.company,
+        category: j.category || 'Geral',
         description: j.description,
-        requirements: j.requirements,
+        requirements: Array.isArray(j.requirements) ? j.requirements : [],
+        benefits: Array.isArray(j.benefits) ? j.benefits : [],
         salary: j.salary,
         type: j.type,
-        isRemote: j.isRemote,
+        is_remote: Boolean(j.isRemote),
         location: j.location,
-        lat: j.lat,
-        lng: j.lng,
+        lat: j.lat ?? null,
+        lng: j.lng ?? null,
         logo: j.logo,
-        dateString: j.dateString,
-        color: j.color || '',
-        start_date: j.startDate,
-        end_date: j.endDate,
-        work_hours: j.workHours,
-        company_address: j.companyAddress,
-        company_neighborhood: j.companyNeighborhood,
-        company_contact_phone: j.companyContactPhone,
-        company_contact_email: j.companyContactEmail,
-        company_responsible_name: j.companyResponsibleName,
-        company_responsible_role: j.companyResponsibleRole,
-        company_logo_url: j.companyLogoUrl,
-        cnpj: j.cnpj,
+        posted_date: j.dateString || 'Hoje',
+        active: j.active !== false,
+        start_date: j.startDate || null,
+        end_date: j.endDate || null,
+        work_hours: j.workHours || null,
+        company_address: j.companyAddress || null,
+        company_neighborhood: j.companyNeighborhood || null,
+        company_contact_phone: j.companyContactPhone || null,
+        company_contact_email: j.companyContactEmail || null,
+        company_responsible_name: j.companyResponsibleName || null,
+        company_responsible_role: j.companyResponsibleRole || null,
+        company_logo_url: j.companyLogoUrl || null,
+        cnpj: j.cnpj || null,
         approval_status: j.approvalStatus || 'accepted',
-        approved_by: j.approvedBy,
-        approved_at: j.approvedAt,
+        approved_by: j.approvedBy || null,
+        approved_at: j.approvedAt || null,
         accepted_candidates_count: j.acceptedCandidatesCount || 0
       }));
       const { error: syncErr } = await supabase.from('jobs').upsert(records);
       if (syncErr) {
+        console.warn('Full jobs upsert failed, attempting minimal upsert:', syncErr.message);
         const fallbackRecords = jobs.map(j => ({
           id: j.id,
           title: j.title,
@@ -1681,12 +1711,15 @@ export const saveAdminCourses = async (courses: Course[]) => {
   window.dispatchEvent(new Event('oportuniza-courses-changed'));
 
   try {
-    const ids = filteredCourses.map(c => c.id);
-    if (ids.length > 0) {
-      const formattedIds = `'${ids.join("','")}'`;
-      await supabase.from('courses').delete().filter('id', 'not.in', `(${formattedIds})`);
-    } else {
-      await supabase.from('courses').delete().neq('id', 'temp_placeholder_dummy');
+    const keepIds = new Set(filteredCourses.map(c => c.id));
+    const { data: existingRows } = await supabase.from('courses').select('id');
+    if (Array.isArray(existingRows)) {
+      const removedIds = existingRows
+        .map((r: any) => r.id)
+        .filter((id: string) => id && !keepIds.has(id));
+      if (removedIds.length > 0) {
+        await supabase.from('courses').delete().in('id', removedIds);
+      }
     }
 
     if (filteredCourses.length > 0) {
@@ -1700,12 +1733,14 @@ export const saveAdminCourses = async (courses: Course[]) => {
         rating: c.rating,
         level: c.level,
         logo: c.logo || '',
-        coverImage: c.coverImage || '',
+        cover_image: c.coverImage || '',
         lessons: c.lessons,
-        completed: c.completed || false,
         active: c.active !== false
       }));
-      await supabase.from('courses').upsert(records);
+      const { error: syncCourseErr } = await supabase.from('courses').upsert(records);
+      if (syncCourseErr) {
+        console.warn('Supabase courses upsert error:', syncCourseErr.message);
+      }
     }
   } catch (err) {
     console.warn('Supabase courses sync failed, keeping local storage sync active:', err);
@@ -1716,21 +1751,21 @@ export const MAP_PARTNERS = [
   {
     id: 'map-p1',
     name: 'CIEE Unidade Central',
-    lat: -25.5925,
-    lng: -49.4080,
+    lat: -25.5880,
+    lng: -49.4070,
     type: 'Estágios & Menor Aprendiz',
-    address: 'R. Pedro Druszcz, 120 - Araucária',
+    address: 'R. Pedro Druszcz, 120 - Centro, Araucária',
     jobsCount: 14,
-    x: 48, // offset percentage for mock vector map
+    x: 48,
     y: 35
   },
   {
     id: 'map-p2',
     name: 'SENAI Hub Tecnológico',
-    lat: -25.4215,
-    lng: -49.2710,
+    lat: -25.4178,
+    lng: -49.2695,
     type: 'Cursos & Qualificação',
-    address: 'Av. Cândido de Abreu, 1500 - Curitiba',
+    address: 'Av. Cândido de Abreu, 1500 - Centro Cívico, Curitiba',
     jobsCount: 8,
     x: 75,
     y: 58
@@ -1738,10 +1773,10 @@ export const MAP_PARTNERS = [
   {
     id: 'map-p3',
     name: 'Oportuniza Coworking Social',
-    lat: -25.4410,
-    lng: -49.2750,
+    lat: -25.4265,
+    lng: -49.2420,
     type: 'Suporte & Computadores Grátis',
-    address: 'Av. Victor Ferreira do Amaral, 450 - Curitiba',
+    address: 'Av. Victor Ferreira do Amaral, 450 - Tarumã, Curitiba',
     jobsCount: 3,
     x: 25,
     y: 20
@@ -1749,10 +1784,10 @@ export const MAP_PARTNERS = [
   {
     id: 'map-p4',
     name: 'Centro de Capacitação do Trabalhador',
-    lat: -25.5890,
-    lng: -49.4150,
+    lat: -25.5892,
+    lng: -49.4085,
     type: 'Empregos CLT',
-    address: 'Av. Dr. Victor do Amaral, 800 - Araucária',
+    address: 'Av. Dr. Victor do Amaral, 800 - Centro, Araucária',
     jobsCount: 22,
     x: 62,
     y: 80

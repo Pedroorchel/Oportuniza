@@ -1,8 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Send, FileText, MessageSquare, Table2, Terminal, BookOpen, CheckCircle, AlertCircle, MapPin, Play, Heart, Briefcase, DollarSign, Calendar, Clock, Award, Shield, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Job, Course, Enrollment } from '../types';
 import { isImageAssetUrl, resolveAssetUrl } from '../lib/assets';
+
+const formatPtBrDate = (value?: string) => {
+  if (!value) return '';
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  if (str.includes('T')) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  }
+  return str;
+};
 
 interface DetailsScreenProps {
   job?: Job;
@@ -30,11 +44,17 @@ export default function DetailsScreen({
   enrollments = []
 }: DetailsScreenProps) {
   const [enrolling, setEnrolling] = useState(false);
+  const [isLocalEnrolled, setIsLocalEnrolled] = useState(false);
   const [enrollToast, setEnrollToast] = useState<{ show: boolean; msg: string; type: 'success' | 'info' | 'error' }>({
     show: false,
     msg: '',
     type: 'success'
   });
+
+  useEffect(() => {
+    setIsLocalEnrolled(false);
+    setEnrollToast(prev => ({ ...prev, show: false }));
+  }, [course?.id, job?.id]);
   
   if (!job && !course) {
     return (
@@ -54,7 +74,6 @@ export default function DetailsScreen({
   const itemId = course?.id || job?.id || '';
   const isFavorited = favorites.includes(itemId);
 
-  const [isLocalEnrolled, setIsLocalEnrolled] = useState(false);
   const isEnrolled = !!(enrollments.some(e => e.courseId === course?.id) || isLocalEnrolled);
 
   // 1. COURSE DETAILS SCREEN
@@ -342,12 +361,12 @@ export default function DetailsScreen({
 
   // 2. JOB DETAILS SCREEN
   return (
-    <div className="w-full h-full flex flex-col bg-[#F8F9FB] overflow-y-auto custom-scroll relative">
+    <div className="w-full h-full flex flex-col bg-[#F8F9FB] dark:bg-[#0B1120] overflow-y-auto custom-scroll relative transition-colors">
       {/* Navigation Top Bar */}
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-2 shrink-0 flex items-center justify-between">
         <button
           onClick={onBack}
-          className="w-11 h-11 bg-white shadow-sm rounded-xl border border-gray-100 flex items-center justify-center text-[#085C77] hover:bg-gray-50 active:scale-95 transition-all outline-none cursor-pointer"
+          className="w-11 h-11 bg-white dark:bg-[#131E32] shadow-sm rounded-xl border border-gray-100 dark:border-slate-800 flex items-center justify-center text-[#085C77] dark:text-sky-300 hover:bg-gray-50 dark:hover:bg-slate-800 active:scale-95 transition-all outline-none cursor-pointer"
           id="back-btn-job"
         >
           <ArrowLeft className="w-5 h-5" />
@@ -357,8 +376,8 @@ export default function DetailsScreen({
           onClick={() => onToggleFavorite(job?.id || '')}
           className={`w-11 h-11 shadow-sm rounded-xl border flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
             isFavorited 
-              ? 'bg-rose-50 border-rose-100 text-rose-500 hover:bg-rose-100' 
-              : 'bg-white border-gray-100 text-gray-450 hover:bg-gray-50'
+              ? 'bg-rose-50/95 dark:bg-rose-950/50 border-rose-100 dark:border-rose-800/60 text-rose-500 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60' 
+              : 'bg-white dark:bg-[#131E32] border-gray-100 dark:border-slate-800 text-gray-450 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800'
           }`}
           id="favorite-btn-job"
           title={isFavorited ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
@@ -376,33 +395,33 @@ export default function DetailsScreen({
           <div className="md:col-span-2 flex flex-col gap-6">
             
             {/* Branding & Base info */}
-            <div className="bg-white rounded-[24px] p-6 sm:p-8 shadow-sm border border-gray-100/80 relative overflow-hidden">
+            <div className="bg-white dark:bg-[#131E32] rounded-[24px] p-6 sm:p-8 shadow-sm border border-gray-100/80 dark:border-slate-800 relative overflow-hidden">
               <span className="absolute left-0 top-0 bottom-0 w-2.5 bg-[#4EA8C7]" />
               
               <div className="pl-2 sm:pl-4">
                 {/* Logo and Titles */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
-                  <div className="w-14 h-14 rounded-2xl border border-gray-100 flex items-center justify-center bg-white shadow-sm shrink-0 overflow-hidden select-none">
+                  <div className="w-14 h-14 rounded-2xl border border-gray-100 dark:border-slate-700 flex items-center justify-center bg-white dark:bg-slate-800 shadow-sm shrink-0 overflow-hidden select-none">
                     {isImageAssetUrl(job?.logo) ? (
                       <img src={resolveAssetUrl(job?.logo)} alt={job?.company || 'Empresa'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
-                      <span className="text-[#E20015] font-black text-sm tracking-tighter uppercase">
+                      <span className="text-[#E20015] dark:text-rose-400 font-black text-sm tracking-tighter uppercase">
                         {job?.company.substring(0, 5) || 'VAGA'}
                       </span>
                     )}
                   </div>
                   <div className="flex flex-col min-w-0">
                     {/* Category tag */}
-                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#085C77] bg-[#085C77]/5 px-2.5 py-0.5 rounded-md border border-[#085C77]/10 w-fit mb-1.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#085C77] dark:text-sky-300 bg-[#085C77]/5 dark:bg-sky-950/50 px-2.5 py-0.5 rounded-md border border-[#085C77]/10 dark:border-sky-800/50 w-fit mb-1.5">
                       {job?.category || 'Carreira'}
                     </span>
-                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight leading-snug">
+                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white tracking-tight leading-snug">
                       {job?.title || 'Desenvolvedor Full Stack'}
                     </h1>
-                    <div className="flex items-center gap-1.5 text-xs text-[#8793A1] font-medium mt-1 truncate">
-                      <span className="text-gray-800 font-semibold">{job?.company || 'Empresa parceira'}</span>
-                      <span className="text-gray-300">•</span>
-                      <span className="flex items-center gap-0.5 text-gray-500">
+                    <div className="flex items-center gap-1.5 text-xs text-[#8793A1] dark:text-slate-400 font-medium mt-1 truncate">
+                      <span className="text-gray-800 dark:text-slate-200 font-semibold">{job?.company || 'Empresa parceira'}</span>
+                      <span className="text-gray-300 dark:text-slate-600">•</span>
+                      <span className="flex items-center gap-0.5 text-gray-500 dark:text-slate-400">
                         <MapPin className="w-3.5 h-3.5" />
                         {job?.location || 'Araucária, PR'}
                       </span>
@@ -410,26 +429,26 @@ export default function DetailsScreen({
                   </div>
                 </div>
 
-                <hr className="border-t border-gray-100 my-6" />
+                <hr className="border-t border-gray-100 dark:border-slate-800 my-6" />
 
                 {/* Descrição da Vaga */}
                 {job?.description && (
                   <div className="flex flex-col gap-3 mb-6">
-                    <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                       <Compass className="w-4 h-4 text-[#52A8C7]" />
                       Descrição do Cargo
                     </h3>
-                    <p className="text-sm text-gray-600 leading-relaxed font-normal">
+                    <p className="text-sm text-gray-600 dark:text-slate-300 leading-relaxed font-normal">
                       {job.description}
                     </p>
                   </div>
                 )}
 
-                <hr className="border-t border-gray-100 my-6" />
+                <hr className="border-t border-gray-100 dark:border-slate-800 my-6" />
 
                 {/* Requisitos List */}
                 <div className="flex flex-col gap-3.5">
-                  <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <Award className="w-4 h-4 text-[#52A8C7]" />
                     Requisitos e Habilidades
                   </h3>
@@ -437,7 +456,7 @@ export default function DetailsScreen({
                     {(job?.requirements || ['Ensino médio completo', 'Disponibilidade total']).map((req, idx) => (
                       <div 
                         key={idx} 
-                        className="text-xs text-gray-700 bg-gray-50 p-3 rounded-xl border border-gray-100/60 flex items-start gap-2.5 leading-relaxed"
+                        className="text-xs text-gray-700 dark:text-slate-200 bg-gray-50/95 dark:bg-slate-800/80 p-3 rounded-xl border border-gray-100/60 dark:border-slate-700/80 flex items-start gap-2.5 leading-relaxed"
                       >
                         <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                         <span>{req}</span>
@@ -446,19 +465,22 @@ export default function DetailsScreen({
                   </div>
                 </div>
 
-                <hr className="border-t border-gray-100 my-6" />
+                <hr className="border-t border-gray-100 dark:border-slate-800 my-6" />
 
                 {/* Beneficios List */}
                 <div className="flex flex-col gap-3.5">
-                  <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <Shield className="w-4 h-4 text-[#52A8C7]" />
                     Benefícios Ofertados
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {['Vale Transporte Integrado', 'Vale Alimentação / Refeição', 'Seguro de Vida Coletivo', 'Assistência Médica Familiar', 'Plano de Carreira e Treinamentos'].map((ben, idx) => (
+                    {(job?.benefits && job.benefits.length > 0
+                      ? job.benefits
+                      : ['Vale Transporte Integrado', 'Vale Alimentação / Refeição', 'Seguro de Vida Coletivo', 'Assistência Médica Familiar', 'Plano de Carreira e Treinamentos']
+                    ).map((ben, idx) => (
                       <div 
                         key={idx} 
-                        className="text-xs text-gray-700 bg-teal-500/[0.02] p-3 rounded-xl border border-teal-500/10 flex items-start gap-2.5 leading-relaxed"
+                        className="text-xs text-gray-700 dark:text-slate-200 bg-teal-500/[0.04] dark:bg-teal-950/30 p-3 rounded-xl border border-teal-500/15 dark:border-teal-800/40 flex items-start gap-2.5 leading-relaxed"
                       >
                         <span className="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0 mt-2" />
                         <span>{ben}</span>
@@ -476,73 +498,73 @@ export default function DetailsScreen({
           <div className="md:col-span-1 flex flex-col gap-5 md:sticky md:top-6">
             
             {/* Quick Summary Spec Dashboard Card */}
-            <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100/80 flex flex-col gap-4">
-              <h3 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3">
+            <div className="bg-white dark:bg-[#131E32] rounded-[24px] p-6 shadow-sm border border-gray-100/80 dark:border-slate-800 flex flex-col gap-4">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white border-b border-gray-100 dark:border-slate-800 pb-3">
                 Resumo da Oportunidade
               </h3>
               
               <div className="flex flex-col gap-3.5">
-                <div className="flex flex-col py-1 border-b border-gray-50">
-                  <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1">
+                <div className="flex flex-col py-1 border-b border-gray-50 dark:border-slate-800/70">
+                  <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-400 flex items-center gap-1">
                     <DollarSign className="w-3.5 h-3.5" />
                     Salário / Bolsa Auxílio
                   </span>
-                  <strong className="text-lg font-extrabold text-[#007BFF] tracking-tight mt-0.5">
+                  <strong className="text-lg font-extrabold text-[#007BFF] dark:text-sky-400 tracking-tight mt-0.5">
                     {job?.salary !== 'A combinar' ? job?.salary : 'Consultar na Entrevista'}
                   </strong>
                 </div>
 
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="text-gray-400 flex items-center gap-1.5">
-                    <Briefcase className="w-4 h-4 text-gray-400" />
+                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50 dark:border-slate-800/70">
+                  <span className="text-gray-400 dark:text-slate-400 flex items-center gap-1.5">
+                    <Briefcase className="w-4 h-4 text-gray-400 dark:text-slate-500" />
                     Contrato
                   </span>
-                  <strong className="text-gray-800 font-bold bg-blue-50 border border-blue-100 px-2 py-0.5 rounded text-[10px]">
+                  <strong className="text-gray-800 dark:text-slate-100 font-bold bg-blue-50/95 dark:bg-slate-800 border border-blue-100 dark:border-slate-700 px-2 py-0.5 rounded text-[10px]">
                     {job?.type || 'CLT'}
                   </strong>
                 </div>
 
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="text-gray-400 flex items-center gap-1.5">
-                    <Calendar className="w-4 h-4 text-gray-400" />
+                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50 dark:border-slate-800/70">
+                  <span className="text-gray-400 dark:text-slate-400 flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-gray-400 dark:text-slate-500" />
                     Modalidade
                   </span>
-                  <strong className="text-gray-800 font-bold">
+                  <strong className="text-gray-800 dark:text-slate-100 font-bold">
                     {job?.isRemote ? 'Contratação Remota' : 'Presencial'}
                   </strong>
                 </div>
 
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="text-gray-400 flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4 text-gray-400" />
+                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50 dark:border-slate-800/70">
+                  <span className="text-gray-400 dark:text-slate-400 flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-gray-400 dark:text-slate-500" />
                     Cidade Principal
                   </span>
-                  <strong className="text-gray-800 font-bold max-w-[120px] truncate" title={job?.location}>
+                  <strong className="text-gray-800 dark:text-slate-100 font-bold max-w-[120px] truncate" title={job?.location}>
                     {job?.location || 'Paraná'}
                   </strong>
                 </div>
 
                 {/* Período de Inscrição (Data Início e Término) */}
                 {job?.startDate && job?.endDate && (
-                  <div className="flex flex-col py-2 border-b border-gray-50 bg-teal-50/50 -mx-6 px-6">
-                    <span className="text-[10px] uppercase font-bold text-teal-700 flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5 text-teal-600" />
+                  <div className="flex flex-col py-2 border-b border-gray-50 dark:border-slate-800/70 bg-teal-50/50 dark:bg-teal-950/40 -mx-6 px-6">
+                    <span className="text-[10px] uppercase font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
                       Período de Inscrição
                     </span>
-                    <strong className="text-xs font-bold text-teal-900 mt-0.5">
-                      {job.startDate} até {job.endDate}
+                    <strong className="text-xs font-bold text-teal-900 dark:text-teal-200 mt-0.5">
+                      {formatPtBrDate(job.startDate)} até {formatPtBrDate(job.endDate)}
                     </strong>
                   </div>
                 )}
 
                 {/* Horário de Trabalho */}
                 {job?.workHours && (
-                  <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                    <span className="text-gray-400 flex items-center gap-1.5">
-                      <Clock className="w-4 h-4 text-gray-400" />
+                  <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50 dark:border-slate-800/70">
+                    <span className="text-gray-400 dark:text-slate-400 flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-gray-400 dark:text-slate-500" />
                       Horário
                     </span>
-                    <strong className="text-gray-800 font-bold text-[11px] truncate max-w-[140px]" title={job.workHours}>
+                    <strong className="text-gray-800 dark:text-slate-100 font-bold text-[11px] truncate max-w-[140px]" title={job.workHours}>
                       {job.workHours}
                     </strong>
                   </div>
@@ -551,11 +573,11 @@ export default function DetailsScreen({
                 {/* Endereço da Empresa em Araucária */}
                 {job?.companyAddress && (
                   <div className="flex flex-col py-1 text-xs">
-                    <span className="text-gray-400 flex items-center gap-1.5 text-[10px] uppercase font-bold">
+                    <span className="text-gray-400 dark:text-slate-400 flex items-center gap-1.5 text-[10px] uppercase font-bold">
                       <MapPin className="w-3.5 h-3.5 text-amber-500" />
                       Endereço da Empresa
                     </span>
-                    <span className="text-gray-700 text-xs font-medium mt-0.5">
+                    <span className="text-gray-700 dark:text-slate-300 text-xs font-medium mt-0.5">
                       {job.companyAddress}
                     </span>
                   </div>
@@ -576,7 +598,7 @@ export default function DetailsScreen({
               
               <button 
                 onClick={() => job && onViewOnMap?.(job)}
-                className="w-full bg-white text-[#52A8C7] border-2 border-[#52A8C7] hover:bg-gray-50 font-bold py-4 rounded-[20px] text-sm shadow-sm transform hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-white dark:bg-[#131E32] text-[#52A8C7] dark:text-sky-300 border-2 border-[#52A8C7] dark:border-[#52A8C7]/70 hover:bg-gray-50 dark:hover:bg-slate-800 font-bold py-4 rounded-[20px] text-sm shadow-sm transform hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 id="map-location-btn"
               >
                 <MapPin className="w-4 h-4 shrink-0" />

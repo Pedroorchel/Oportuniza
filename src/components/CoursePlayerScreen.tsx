@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Play, CheckCircle2, Circle, Clock, Award, Share2, Download } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Course } from '../types';
+import { toast } from '../lib/toast';
 
 interface CoursePlayerScreenProps {
   course: Course;
@@ -10,6 +11,7 @@ interface CoursePlayerScreenProps {
   lessonProgress: Record<string, boolean>; // e.g. { "lesson title": true }
   userName?: string;
   userId?: string;
+  isAlreadyCompleted?: boolean;
   onCompleteCourse?: (userId: string, courseId: string, userName: string, courseTitle: string) => Promise<void>;
 }
 
@@ -20,9 +22,10 @@ export default function CoursePlayerScreen({
   lessonProgress,
   userName = 'Aluno de Honra',
   userId,
+  isAlreadyCompleted = false,
   onCompleteCourse,
 }: CoursePlayerScreenProps) {
-  const [justCompleted, setJustCompleted] = useState(false);
+  const [justCompleted, setJustCompleted] = useState(Boolean(isAlreadyCompleted));
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
   // Find first lesson with a youtubeId, default to index 0
@@ -31,12 +34,18 @@ export default function CoursePlayerScreen({
     return firstWithId !== -1 ? firstWithId : 0;
   });
 
+  useEffect(() => {
+    const firstWithId = course.lessons.findIndex((l) => l.youtubeId);
+    setActiveLessonIndex(firstWithId !== -1 ? firstWithId : 0);
+    setJustCompleted(Boolean(isAlreadyCompleted));
+  }, [course.id, isAlreadyCompleted]);
+
   const activeLesson = course.lessons[activeLessonIndex];
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
   // Calculate total completed in local state
   const completedLessonsCount = course.lessons.filter((l) => lessonProgress[l.title]).length;
-  const progressPercent = Math.round((completedLessonsCount / course.lessons.length) * 100);
+  const progressPercent = course.lessons.length > 0 ? Math.round((completedLessonsCount / course.lessons.length) * 100) : 0;
 
   const handleComplete = async () => {
     if (userId && onCompleteCourse) {
@@ -207,11 +216,17 @@ export default function CoursePlayerScreen({
     onToggleLessonCompletion(course.id, title);
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (activeLesson?.youtubeId) {
       const link = `https://www.youtube.com/watch?v=${activeLesson.youtubeId}`;
-      navigator.clipboard.writeText(link);
-      alert('Link do vídeo copiado para a área de transferência!');
+      try {
+        await navigator.clipboard?.writeText(link);
+        toast.success('Link da aula copiado para a área de transferência!');
+      } catch {
+        toast.info(`Link da aula: ${link}`);
+      }
+    } else {
+      toast.info('Esta aula não possui link de vídeo externo para compartilhar.');
     }
   };
 

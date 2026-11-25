@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Heart, Briefcase, GraduationCap, Clock, MapPin, DollarSign, Building, Star, ChevronRight, ArrowLeft } from 'lucide-react';
 import { Job, Course, Application } from '../types';
 import { mockJobs, mockCourses } from '../data';
@@ -21,9 +21,22 @@ export default function FavoritesSection({
   applications = [],
 }: FavoritesSectionProps) {
   const [activeTab, setActiveTab] = useState<'jobs' | 'courses'>('jobs');
+  const [liveJobs, setLiveJobs] = useState<Job[]>(() => [...mockJobs]);
+  const [liveCourses, setLiveCourses] = useState<Course[]>(() => [...mockCourses]);
+
+  useEffect(() => {
+    const syncJobs = () => setLiveJobs([...mockJobs]);
+    const syncCourses = () => setLiveCourses([...mockCourses]);
+    window.addEventListener('oportuniza-jobs-changed', syncJobs);
+    window.addEventListener('oportuniza-courses-changed', syncCourses);
+    return () => {
+      window.removeEventListener('oportuniza-jobs-changed', syncJobs);
+      window.removeEventListener('oportuniza-courses-changed', syncCourses);
+    };
+  }, []);
 
   // Filter jobs that are favorited and not yet applied to
-  const favoritedJobs = mockJobs.filter((job) => {
+  const favoritedJobs = liveJobs.filter((job) => {
     const isFav = favorites.includes(job.id);
     if (!isFav) return false;
     
@@ -32,7 +45,7 @@ export default function FavoritesSection({
   });
 
   // Filter courses that are favorited
-  const favoritedCourses = mockCourses.filter((course) => favorites.includes(course.id) && course.active !== false);
+  const favoritedCourses = liveCourses.filter((course) => favorites.includes(course.id) && course.active !== false);
 
   return (
     <div className="w-full h-full flex flex-col bg-[#F9FAFB] absolute inset-0">

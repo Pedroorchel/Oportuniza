@@ -286,7 +286,7 @@ export default function Sidebar({
         </nav>
 
         <div className="text-center text-[10px] text-gray-400 dark:text-gray-500 font-mono font-medium mt-auto pt-4 pb-4">
-          Oportuniza | Versão 1.5.0
+          Oportuniza | Versão 2.4.0
         </div>
       </div>
     </>

@@ -111,10 +111,18 @@ export default function ProfileAndSettings({
   const [companyWebsite, setCompanyWebsite] = useState(user?.companyWebsite || '');
 
   // Push Notifications state (Specifically for TI / Tech Jobs)
-  const [tiJobsPush, setTiJobsPush] = useState<boolean>(user?.tiJobsPushEnabled ?? false);
+  const [tiJobsPush, setTiJobsPush] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && user?.id) {
+      const stored = localStorage.getItem(`oportuniza-ti-push-${user.id}`);
+      if (stored !== null) return stored === 'true';
+    }
+    return user?.tiJobsPushEnabled ?? false;
+  });
   const [generalNotifications, setGeneralNotifications] = useState<boolean>(user?.notificationsEnabled ?? true);
   const [marketingEmails, setMarketingEmails] = useState<boolean>(user?.marketingEmailsEnabled ?? false);
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission | 'unsupported'>('default');
+  const [showClearCacheModal, setShowClearCacheModal] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
 
   // Password update states
   const [newPassword, setNewPassword] = useState('');
@@ -142,7 +150,16 @@ export default function ProfileAndSettings({
       setBio(user.bio || '');
       setSkills(user.skills || []);
       setAvatarUrl(user.avatarUrl || '');
-      setTiJobsPush(user.tiJobsPushEnabled ?? false);
+      setCompanyName(user.companyName || user.name || '');
+      setCnpj(user.cnpj || '');
+      setResponsibleName(user.responsibleName || user.name || '');
+      setResponsibleRole(user.responsibleRole || 'RH / Recrutamento');
+      setCompanySegment(user.companySegment || 'Comércio & Varejo');
+      setCompanyNeighborhood(user.companyNeighborhood || 'Centro');
+      setCompanyAddress(user.companyAddress || '');
+      setCompanyWebsite(user.companyWebsite || '');
+      const storedTi = user.id ? localStorage.getItem(`oportuniza-ti-push-${user.id}`) : null;
+      setTiJobsPush(storedTi !== null ? storedTi === 'true' : (user.tiJobsPushEnabled ?? false));
       setGeneralNotifications(user.notificationsEnabled ?? true);
       setMarketingEmails(user.marketingEmailsEnabled ?? false);
     }
@@ -228,6 +245,12 @@ export default function ProfileAndSettings({
     }
 
     if (user) {
+      if (user.id) {
+        try {
+          localStorage.setItem(`oportuniza-ti-push-${user.id}`, String(enabled));
+        } catch {}
+      }
+
       const updatedUser: User = {
         ...user,
         tiJobsPushEnabled: enabled,
@@ -235,21 +258,6 @@ export default function ProfileAndSettings({
       };
 
       onSetUser(updatedUser);
-
-      // Sync with Supabase if user exists
-      try {
-        if (user.id) {
-          await supabase
-            .from('users')
-            .update({
-              notifications_enabled: enabled,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', user.id);
-        }
-      } catch (err) {
-        console.warn('Supabase update warning:', err);
-      }
     }
 
     if (enabled) {
@@ -263,7 +271,7 @@ export default function ProfileAndSettings({
     }
   };
 
-  const handleToggleGeneralNotifications = (enabled: boolean) => {
+  const handleToggleGeneralNotifications = async (enabled: boolean) => {
     setGeneralNotifications(enabled);
     if (user) {
       const updatedUser: User = {
@@ -271,11 +279,21 @@ export default function ProfileAndSettings({
         notificationsEnabled: enabled
       };
       onSetUser(updatedUser);
+      try {
+        if (user.id) {
+          await supabase
+            .from('users')
+            .update({ notifications_enabled: enabled, updated_at: new Date().toISOString() })
+            .eq('id', user.id);
+        }
+      } catch (err) {
+        console.warn('Supabase update warning:', err);
+      }
     }
     toast.info(enabled ? 'Alertas gerais ativados.' : 'Alertas gerais desativados.');
   };
 
-  const handleToggleMarketing = (enabled: boolean) => {
+  const handleToggleMarketing = async (enabled: boolean) => {
     setMarketingEmails(enabled);
     if (user) {
       const updatedUser: User = {
@@ -283,6 +301,16 @@ export default function ProfileAndSettings({
         marketingEmailsEnabled: enabled
       };
       onSetUser(updatedUser);
+      try {
+        if (user.id) {
+          await supabase
+            .from('users')
+            .update({ marketing_emails_enabled: enabled, updated_at: new Date().toISOString() })
+            .eq('id', user.id);
+        }
+      } catch (err) {
+        console.warn('Supabase update warning:', err);
+      }
     }
   };
 
@@ -324,7 +352,7 @@ export default function ProfileAndSettings({
 
       const updatedUser: User = {
         ...user,
-        name,
+        name: isCompanyAccount ? (companyName || name) : name,
         email,
         phone,
         education,
@@ -332,6 +360,18 @@ export default function ProfileAndSettings({
         bio,
         skills,
         avatarUrl,
+        ...(isCompanyAccount
+          ? {
+              companyName: companyName || name,
+              cnpj,
+              responsibleName: responsibleName || name,
+              responsibleRole,
+              companySegment,
+              companyNeighborhood,
+              companyAddress,
+              companyWebsite,
+            }
+          : {}),
         tiJobsPushEnabled: tiJobsPush,
         notificationsEnabled: generalNotifications,
         marketingEmailsEnabled: marketingEmails,
@@ -344,7 +384,7 @@ export default function ProfileAndSettings({
         await supabase
           .from('users')
           .update({
-            name,
+            name: updatedUser.name,
             phone,
             education,
             experience,
@@ -356,6 +396,24 @@ export default function ProfileAndSettings({
             updated_at: new Date().toISOString()
           })
           .eq('id', user.id);
+      }
+
+      if (isCompanyAccount && user.email) {
+        await saveCompanyProfile({
+          user_id: user.id,
+          company_name: companyName || name,
+          cnpj,
+          responsible_name: responsibleName || name,
+          responsible_role: responsibleRole,
+          email: user.email,
+          phone,
+          segment: companySegment,
+          neighborhood: companyNeighborhood,
+          address: companyAddress,
+          website: companyWebsite,
+          bio,
+          logo_url: avatarUrl
+        });
       }
 
       toast.success('Perfil e preferências salvos com sucesso!');
@@ -893,16 +951,16 @@ export default function ProfileAndSettings({
                   <Trash2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-red-900">Apagar Dados Locais</h4>
+                  <h4 className="text-sm font-semibold text-red-900">Limpar Cache Local</h4>
                   <p className="text-xs text-red-600/70 mt-1 max-w-md leading-relaxed">
-                    Limpe o cache local deste dispositivo. Isso apagará o histórico de cursos e vagas salvas, mas não excluirá sua conta.
+                    Restaura o armazenamento temporário deste dispositivo sem excluir sua conta ou histórico salvo no servidor.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={onDeleteAllData}
-                className="z-10 shrink-0 w-full sm:w-auto px-6 py-2.5 rounded-[12px] bg-white hover:bg-red-50 text-red-600 border border-red-200 text-sm font-semibold transition-all shadow-sm"
+                onClick={() => setShowClearCacheModal(true)}
+                className="z-10 shrink-0 w-full sm:w-auto px-6 py-2.5 rounded-[12px] bg-white hover:bg-red-50 text-red-600 border border-red-200 text-sm font-semibold transition-all shadow-sm cursor-pointer"
               >
                 Limpar Cache
               </button>
@@ -1002,6 +1060,51 @@ export default function ProfileAndSettings({
         )}
 
       </div>
+
+      {showClearCacheModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-gray-100 shadow-2xl flex flex-col gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-500 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-bold text-gray-900">Limpar cache local?</h3>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                Isso irá restaurar os dados temporários salvos no navegador e recarregar as vagas e cursos. Sua conta e histórico no servidor permanecem preservados.
+              </p>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isClearingCache}
+                onClick={() => setShowClearCacheModal(false)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isClearingCache}
+                onClick={async () => {
+                  setIsClearingCache(true);
+                  try {
+                    await onDeleteAllData();
+                    setShowClearCacheModal(false);
+                    toast.success('Cache local limpo e dados atualizados!');
+                  } catch {
+                    toast.error('Erro ao limpar cache local.');
+                  } finally {
+                    setIsClearingCache(false);
+                  }
+                }}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                {isClearingCache ? 'Limpando...' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

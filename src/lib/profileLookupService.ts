@@ -209,27 +209,13 @@ export async function fetchProfileBundle(authUser?: {
 } | null): Promise<ProfileBundleResult> {
   const userId = String(authUser?.id || '').trim();
   const cleanEmail = cleanEmailAddress(authUser?.email);
+  const meta2FA =
+    typeof authUser?.user_metadata?.is_2fa_enabled === 'boolean'
+      ? authUser.user_metadata.is_2fa_enabled
+      : undefined;
 
-  // 1. Try SECURITY DEFINER RPC first (handles legacy IDs, whitespace, duplicates, and activity atomically)
-  try {
-    const { data: rpcData, error: rpcErr } = await supabase.rpc('get_my_profile_bundle');
-    if (!rpcErr && rpcData && typeof rpcData === 'object') {
-      const payload = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-      if (payload && (payload.found || payload.user || payload.company)) {
-        return {
-          dbUser: payload.user || null,
-          companyData: payload.company || null,
-          hasActivity: Boolean(payload.has_activity),
-          hasPassword: Boolean(payload.has_password),
-          source: 'rpc'
-        };
-      }
-    }
-  } catch {
-    // Fallback cleanly to table queries if RPC is not deployed yet
-  }
-
-  // 2. Fallback direct queries using .limit(...) instead of .maybeSingle() (never fails on PGRST116 duplicates)
+  // 1. Try direct authorized table queries first so an outdated get_my_profile_bundle RPC
+  //    in the live database cannot silently overwrite the owner's is_2fa_enabled=false preference.
   const candidateUserRows: Record<string, any>[] = [];
   let companyData: Record<string, any> | null = null;
   let hasActivity = false;
@@ -246,7 +232,7 @@ export async function fetchProfileBundle(authUser?: {
         candidateUserRows.push(...rowsById);
       }
     } catch {
-      // Ignore query fallback error
+      // Ignore query error and fall back
     }
   }
 
@@ -267,7 +253,7 @@ export async function fetchProfileBundle(authUser?: {
         }
       }
     } catch {
-      // Ignore query fallback error
+      // Ignore query error and fall back
     }
   }
 
@@ -283,6 +269,46 @@ export async function fetchProfileBundle(authUser?: {
       candidateUserRows.find((r) => hasPopulatedProfileFields(r)) ||
       candidateUserRows.find((r) => String(r.status || '').toLowerCase() === 'active') ||
       candidateUserRows[0];
+  }
+
+  const hasExactUidMatch = Boolean(
+    userId && dbUser && String(dbUser.id || '').trim() === userId
+  );
+
+  // 2. Fall back to SECURITY DEFINER RPC only when direct query did not locate a matching row
+  //    (e.g., legacy ID mismatch), while guarding against RPCs that overwrite is_2fa_enabled=false.
+  if (!dbUser || !hasExactUidMatch) {
+    const preRpc2FA =
+      typeof dbUser?.is_2fa_enabled === 'boolean'
+        ? dbUser.is_2fa_enabled
+        : typeof dbUser?.is2FAEnabled === 'boolean'
+        ? dbUser.is2FAEnabled
+        : meta2FA;
+
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('get_my_profile_bundle');
+      if (!rpcErr && rpcData && typeof rpcData === 'object') {
+        const payload = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        if (payload && (payload.found || payload.user || payload.company)) {
+          let resolvedRpcUser = payload.user || null;
+          if (resolvedRpcUser && preRpc2FA === false && resolvedRpcUser.is_2fa_enabled === true) {
+            resolvedRpcUser = { ...resolvedRpcUser, is_2fa_enabled: false };
+            try {
+              await supabase.rpc('set_my_2fa_enabled', { p_enabled: false });
+            } catch {}
+          }
+          return {
+            dbUser: resolvedRpcUser,
+            companyData: payload.company || null,
+            hasActivity: Boolean(payload.has_activity),
+            hasPassword: Boolean(payload.has_password),
+            source: 'rpc'
+          };
+        }
+      }
+    } catch {
+      // Continue with direct query result if RPC is unavailable
+    }
   }
 
   const candidateIds = Array.from(

@@ -73,7 +73,15 @@ export default function EnrollmentsSection({
                     </p>
                     <p className="text-[9px] text-gray-400 font-medium mt-0.5 flex items-center gap-1">
                       <Calendar className="w-3 h-3 text-gray-400" />
-                      Inscrito em {enrollment.enrolledDate}
+                      Inscrito em {(() => {
+                        const raw = enrollment.enrolledDate;
+                        if (!raw) return 'Hoje';
+                        if (String(raw).includes('T') || /^\d{4}-\d{2}-\d{2}/.test(String(raw))) {
+                          const d = new Date(raw);
+                          if (!isNaN(d.getTime())) return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                        }
+                        return raw;
+                      })()}
                     </p>
                   </div>
 

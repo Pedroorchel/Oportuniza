@@ -98,7 +98,10 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
   };
 
   const getWhatsAppLink = () => {
-    const phone = '5541996502358';
+    const rawDigits = (job.companyContactPhone || '').replace(/\D/g, '');
+    const phone = rawDigits.length >= 8
+      ? (rawDigits.startsWith('55') ? rawDigits : `55${rawDigits}`)
+      : '5541996502358';
     const baseUrl = `${window.location.origin}${window.location.pathname}`.replace(/\/+$/, '');
     const jobLink = `${baseUrl}/?job=${job.id}`;
     const safeLink = getSanitizedCvLink();
@@ -153,14 +156,18 @@ export default function ApplyScreen({ job, onBack, onApplyJob, navigate }: Apply
   };
 
   const handleWhatsAppApply = async (e: React.MouseEvent) => {
+    if (isSubmitting) {
+      e.preventDefault();
+      return;
+    }
     const rawLink = cvLink.trim();
     if (rawLink && !sanitizeExternalUrl(rawLink)) {
       e.preventDefault();
       setFormError('Por segurança, corrija o link do currículo (deve iniciar com https:// ou http://).');
       return;
     }
-    // Also save application into platform before opening WhatsApp
-    handleConfirmApply();
+    // Also save application into platform when opening WhatsApp
+    await handleConfirmApply();
   };
 
   return (

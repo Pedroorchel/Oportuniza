@@ -140,16 +140,27 @@ export default function App() {
       }
       
       if (enrResult.data) {
-        const mappedEnr: Enrollment[] = enrResult.data.map(enr => ({
-          id: enr.id,
-          courseId: enr.course_id,
-          courseTitle: enr.course_title,
-          instructor: enr.instructor,
-          enrolledDate: enr.enrolled_date,
-          status: enr.status,
-          progress: enr.progress,
-          userName: enr.user_name
-        }));
+        const mappedEnr: Enrollment[] = enrResult.data.map(enr => {
+          let formattedEnrDate = enr.enrolled_date || 'Hoje';
+          if (enr.enrolled_date && String(enr.enrolled_date).includes('T')) {
+            try {
+              const d = new Date(enr.enrolled_date);
+              if (!isNaN(d.getTime())) {
+                formattedEnrDate = d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+              }
+            } catch {}
+          }
+          return {
+            id: enr.id,
+            courseId: enr.course_id,
+            courseTitle: enr.course_title,
+            instructor: enr.instructor,
+            enrolledDate: formattedEnrDate,
+            status: enr.status,
+            progress: enr.progress,
+            userName: enr.user_name
+          };
+        });
         setEnrollments(mappedEnr);
       } else if (enrResult.error) {
         console.error('Error fetching enrollments:', enrResult.error);
@@ -294,17 +305,46 @@ export default function App() {
     };
   }, [user]);
 
-  // Synchronize courses changes when admin acts
+  // Synchronize courses changes when admin acts and hydrate saved lesson progress
+  const hydrateCoursesWithUserProgress = useCallback((rawCourses: Course[], userId?: string) => {
+    if (!userId) return rawCourses;
+    try {
+      const savedMapRaw = localStorage.getItem(`oportuniza-lesson-progress-${userId}`);
+      if (!savedMapRaw) return rawCourses;
+      const savedMap: Record<string, Record<string, boolean>> = JSON.parse(savedMapRaw);
+      return rawCourses.map(c => {
+        const courseProg = savedMap[c.id];
+        if (!courseProg) return c;
+        const updatedLessons = c.lessons.map(l => ({
+          ...l,
+          done: typeof courseProg[l.title] === 'boolean' ? courseProg[l.title] : Boolean(l.done)
+        }));
+        const completedCount = updatedLessons.filter(l => l.done).length;
+        return {
+          ...c,
+          lessons: updatedLessons,
+          completed: updatedLessons.length > 0 && completedCount === updatedLessons.length
+        };
+      });
+    } catch {
+      return rawCourses;
+    }
+  }, []);
+
   useEffect(() => {
     const handleCoursesChanged = () => {
-      setCourses([...mockCourses]);
+      setCourses(hydrateCoursesWithUserProgress([...mockCourses], user?.id));
     };
 
     window.addEventListener('oportuniza-courses-changed', handleCoursesChanged);
     return () => {
       window.removeEventListener('oportuniza-courses-changed', handleCoursesChanged);
     };
-  }, []);
+  }, [user?.id, hydrateCoursesWithUserProgress]);
+
+  useEffect(() => {
+    setCourses(hydrateCoursesWithUserProgress([...mockCourses], user?.id));
+  }, [user?.id, hydrateCoursesWithUserProgress]);
 
   // Details navigation state
   const [detailJob, setDetailJob] = useState<Job | null>(null);
@@ -323,7 +363,7 @@ export default function App() {
         (j.location || '').toLowerCase().includes(q) ||
         (j.description || '').toLowerCase().includes(q)
     ).slice(0, 4);
-  }, [homeSearchQuery]);
+  }, [homeSearchQuery, jobsVersion]);
 
   const handleHomeSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -785,8 +825,16 @@ export default function App() {
               try {
                 localStorage.setItem('oportuniza-current-user', JSON.stringify(dbLoadedUser));
               } catch (e) {}
-              if (dbLoadedUser.favorites) {
-                setFavorites(dbLoadedUser.favorites);
+              try {
+                const storedFavsRaw = localStorage.getItem(`oportuniza-favorites-${dbLoadedUser.id}`);
+                const storedFavs: string[] = storedFavsRaw ? JSON.parse(storedFavsRaw) : [];
+                const dbFavs = Array.isArray(dbLoadedUser.favorites) ? dbLoadedUser.favorites : [];
+                const mergedFavs = Array.from(new Set([...dbFavs, ...storedFavs]));
+                setFavorites(mergedFavs);
+              } catch {
+                if (Array.isArray(dbLoadedUser.favorites)) {
+                  setFavorites(dbLoadedUser.favorites);
+                }
               }
             } else {
               // Check if user is blocked before attempting default row creation
@@ -940,9 +988,15 @@ export default function App() {
               } else if (isAdminEmail) {
                 setCurrentScreen('admin');
               }
+              try {
+                const storedFavsRaw = localStorage.getItem(`oportuniza-favorites-${resolvedInitialUser.id}`);
+                if (storedFavsRaw) {
+                  const parsed = JSON.parse(storedFavsRaw);
+                  if (Array.isArray(parsed)) setFavorites(parsed);
+                }
+              } catch {}
             }
 
-            setFavorites(prev => (prev.length > 0 ? prev : []));
             fetchApplications();
           } catch (err: any) {
             if (err.message && (err.message === 'Failed to fetch' || err.message.includes('fetch'))) {
@@ -1002,17 +1056,6 @@ export default function App() {
     }, 10000);
 
     return () => clearInterval(pollInterval);
-  }, []);
-
-  useEffect(() => {
-    const handleCoursesChanged = () => {
-      setCourses([...mockCourses]);
-    };
-
-    window.addEventListener('oportuniza-courses-changed', handleCoursesChanged);
-    return () => {
-      window.removeEventListener('oportuniza-courses-changed', handleCoursesChanged);
-    };
   }, []);
 
   useEffect(() => {
@@ -1447,12 +1490,21 @@ export default function App() {
     }
 
     if (data) {
+      let formattedEnrolledDate = new Date().toLocaleDateString('pt-BR');
+      if (data.enrolled_date) {
+        try {
+          const parsedD = new Date(data.enrolled_date);
+          formattedEnrolledDate = !isNaN(parsedD.getTime())
+            ? parsedD.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+            : String(data.enrolled_date);
+        } catch {}
+      }
       const newEnr: Enrollment = {
         id: String(data.id || Date.now()),
         courseId: data.course_id || course.id,
         courseTitle: data.course_title || course.title,
         instructor: data.instructor || course.instructor,
-        enrolledDate: data.enrolled_date || new Date().toLocaleDateString('pt-BR'),
+        enrolledDate: formattedEnrolledDate,
         status: data.status || 'Iniciado',
         progress: data.progress || 0,
         userName: data.user_name || user.name
@@ -1479,8 +1531,23 @@ export default function App() {
           return l;
         });
 
+        // Persist lesson completion state per user & course in localStorage
+        try {
+          const key = `oportuniza-lesson-progress-${user.id}`;
+          const existingRaw = localStorage.getItem(key);
+          const existingMap: Record<string, Record<string, boolean>> = existingRaw ? JSON.parse(existingRaw) : {};
+          const courseMap: Record<string, boolean> = {};
+          updatedLessons.forEach(l => {
+            courseMap[l.title] = Boolean(l.done);
+          });
+          existingMap[courseId] = courseMap;
+          localStorage.setItem(key, JSON.stringify(existingMap));
+        } catch (e) {
+          console.warn('Erro ao salvar progresso local da aula:', e);
+        }
+
         const completedCount = updatedLessons.filter(l => l.done).length;
-        const progressVal = Math.round((completedCount / updatedLessons.length) * 100);
+        const progressVal = updatedLessons.length > 0 ? Math.round((completedCount / updatedLessons.length) * 100) : 0;
         const statusVal = progressVal === 100 ? ('Concluído' as const) : progressVal > 0 ? ('Em andamento' as const) : ('Iniciado' as const);
 
         // Update enrollment progress in state & storage
@@ -1500,7 +1567,7 @@ export default function App() {
         // Sync with Supabase enrollments table
         const syncEnrollment = async () => {
           try {
-            await supabase
+            const { error: syncErr } = await supabase
               .from('enrollments')
               .update({ 
                 progress: progressVal, 
@@ -1509,6 +1576,9 @@ export default function App() {
               })
               .eq('user_id', user.id)
               .eq('course_id', courseId);
+            if (syncErr) {
+              console.warn("Failed to sync enrollment progress to DB:", syncErr.message);
+            }
           } catch (err) {
             console.warn("Failed to sync enrollment progress to DB:", err);
           }
@@ -1524,16 +1594,38 @@ export default function App() {
   };
 
   const handleCompleteCourse = async (userId: string, courseId: string, userName: string, courseTitle: string) => {
+    const alreadyCompleted = completedCourses.some(c => c.course_id === courseId);
+    if (alreadyCompleted) {
+      setNotification('Este curso já está concluído e salvo nos seus certificados!');
+      setTimeout(() => setNotification(null), 2500);
+      return;
+    }
+
     try {
-      const { error } = await supabase
+      const { data: existingRows } = await supabase
         .from('user_course_progress')
-        .insert([{ user_id: userId, course_id: courseId, user_name: userName, course_title: courseTitle }]);
+        .select('id')
+        .eq('user_id', userId)
+        .eq('course_id', courseId)
+        .limit(1);
+
+      if (existingRows && existingRows.length > 0) {
+        setNotification('Este curso já está concluído e salvo nos seus certificados!');
+        setTimeout(() => setNotification(null), 2500);
+        return;
+      }
+
+      const { data: insertedRow, error } = await supabase
+        .from('user_course_progress')
+        .insert([{ user_id: userId, course_id: courseId, user_name: userName, course_title: courseTitle }])
+        .select('*')
+        .single();
       if (error) {
         console.error('Error saving course completion:', error);
+        setNotification('Erro ao registrar conclusão do curso.');
       } else {
         setNotification('Curso concluído com sucesso e salvo em sua conta!');
-        // Update local state immediately
-        const newCompleted: UserCourseProgress = {
+        const newCompleted: UserCourseProgress = insertedRow || {
           id: Math.random().toString(36).substr(2, 9),
           user_id: userId,
           course_id: courseId,
@@ -1548,36 +1640,69 @@ export default function App() {
     }
   };
 
-  const handleUnsubscribeCourse = (id: string) => {
-    const updated = enrollments.filter(e => e.id !== id);
-    setEnrollments(updated);
-    setNotification('Inscrição cancelada com sucesso');
-    setTimeout(() => setNotification(null), 2000);
+  const handleUnsubscribeCourse = async (id: string) => {
+    const targetEnrollment = enrollments.find(e => e.id === id);
+    try {
+      const { error } = await supabase
+        .from('enrollments')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error deleting enrollment:', error);
+        setNotification('Erro ao cancelar inscrição. Tente novamente.');
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      }
+
+      if (user?.id && targetEnrollment?.courseId) {
+        try {
+          const key = `oportuniza-lesson-progress-${user.id}`;
+          const existingRaw = localStorage.getItem(key);
+          if (existingRaw) {
+            const existingMap = JSON.parse(existingRaw);
+            delete existingMap[targetEnrollment.courseId];
+            localStorage.setItem(key, JSON.stringify(existingMap));
+          }
+        } catch {}
+      }
+
+      setEnrollments(prev => prev.filter(e => e.id !== id));
+      setNotification('Inscrição cancelada com sucesso');
+      setTimeout(() => setNotification(null), 2000);
+    } catch (err) {
+      console.error('Exception deleting enrollment:', err);
+      setNotification('Erro ao se conectar ao banco de dados.');
+      setTimeout(() => setNotification(null), 3000);
+    }
   };
 
-  const handleDeleteAllData = async () => {
-    const emailToClear = user?.email?.trim().toLowerCase();
-    if (user?.id) {
-      try {
-        await supabase
-          .from('users')
-          .delete()
-          .eq('id', user.id);
-      } catch (err) {
-        console.error("Error deleting user from database:", err);
+  const handleClearLocalCache = async () => {
+    try {
+      const keysToClear = [
+        'oportuniza-jobs',
+        'oportuniza-courses',
+        'oportuniza-admin-jobs',
+        'oportuniza-admin-courses',
+        'oportuniza-applications',
+        'oportuniza-enrollments',
+        'oportuniza-courses-progress'
+      ];
+      keysToClear.forEach(k => localStorage.removeItem(k));
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('oportuniza-chat-')) {
+          localStorage.removeItem(key);
+        }
       }
+      await Promise.all([loadJobsFromSupabase(), loadCoursesFromSupabase()]);
+      setNotification('Cache local limpo e dados atualizados com sucesso!');
+      setTimeout(() => setNotification(null), 2500);
+    } catch (err) {
+      console.error('Error clearing local cache:', err);
+      setNotification('Erro ao limpar cache local.');
+      setTimeout(() => setNotification(null), 2500);
     }
-
-    if (emailToClear) {
-      try {
-        localStorage.removeItem(`oportuniza-activated-${emailToClear}`);
-      } catch (e) {}
-    }
-
-    await handleSignOut();
-    
-    setNotification('Todos os seus dados foram excluídos permanentemente');
-    setTimeout(() => setNotification(null), 3000);
   };
 
   const handleToggleFavorite = async (jobId: string) => {
@@ -1592,9 +1717,18 @@ export default function App() {
     }
     setFavorites(updated);
 
-    // Persist to DB users table under a JSONB column or similar
-    // We removed DB sync because the column 'favorites' might not exist in the 'users' table.
-    // Local storage is sufficient for now.
+    try {
+      localStorage.setItem(`oportuniza-favorites-${user.id}`, JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Erro ao salvar favoritos no localStorage:', e);
+    }
+
+    try {
+      await supabase
+        .from('users')
+        .update({ favorites: updated })
+        .eq('id', user.id);
+    } catch {}
 
     if (isAdding) {
       setNotification('Adicionado aos favoritos!');
@@ -2147,7 +2281,7 @@ export default function App() {
                   {/* 3 Real-time KPI Metric Badges */}
                   <div className="relative z-10 grid grid-cols-3 gap-3 pt-4 border-t border-white/10 text-center sm:text-left">
                     <div className="flex flex-col">
-                      <span className="text-lg sm:text-2xl font-black text-white tabular-nums tracking-tight">120+</span>
+                      <span className="text-lg sm:text-2xl font-black text-white tabular-nums tracking-tight">{mockJobs.length}</span>
                       <span className="text-[11px] text-slate-300">Vagas em Aberto</span>
                     </div>
                     <div className="flex flex-col border-l border-white/10 pl-3 sm:pl-4">
@@ -2210,7 +2344,7 @@ export default function App() {
                         <Briefcase className="w-5 h-5" />
                       </div>
                       <span className="text-xs font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/50 px-2 py-0.5 rounded-lg border border-cyan-100 dark:border-cyan-900/50">
-                        120+ Vagas
+                        {mockJobs.length} Vagas
                       </span>
                     </div>
                     <div>
@@ -2327,12 +2461,12 @@ export default function App() {
                           onClick={() => handleScreenNavigation('jobs')}
                           className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
                         >
-                          <span>Ver todas as 120+</span>
+                          <span>Ver todas ({mockJobs.length})</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-3" data-jobs-version={jobsVersion}>
                         {mockJobs.slice(0, 3).map((job) => (
                           <div
                             key={job.id}
@@ -2634,6 +2768,15 @@ export default function App() {
                 setDetailCourse(null);
                 handleScreenNavigation('details');
               }}
+              onQuickApply={(job) => {
+                setDetailJob(job);
+                setDetailCourse(null);
+                handleScreenNavigation('apply');
+              }}
+              onViewOnMap={(job) => {
+                setFocusedJob(job || null);
+                handleScreenNavigation('map');
+              }}
               initialSearchQuery={jobSearchFilter}
             />
           )}
@@ -2669,7 +2812,7 @@ export default function App() {
               favorites={favorites}
               onToggleFavorite={handleToggleFavorite}
               applications={applications}
-              onDeleteAllData={handleDeleteAllData}
+              onDeleteAllData={handleClearLocalCache}
               enrollments={enrollments}
               onContinueCourse={handleContinueCourse}
               onUnsubscribeCourse={handleUnsubscribeCourse}
@@ -2692,7 +2835,7 @@ export default function App() {
               applications={applications}
               enrollments={enrollments}
               completedCourses={completedCourses}
-              onDeleteAllData={handleDeleteAllData}
+              onDeleteAllData={handleClearLocalCache}
               onSignOut={handleSignOut}
             />
           )}
@@ -2761,11 +2904,15 @@ export default function App() {
             <FavoritesSection
               favorites={favorites}
               onToggleFavorite={handleToggleFavorite}
-              onNavigateToJob={() => {
-                handleScreenNavigation('jobs');
+              onNavigateToJob={(job) => {
+                setDetailJob(job);
+                setDetailCourse(null);
+                handleScreenNavigation('details');
               }}
-              onNavigateToCourse={() => {
-                handleScreenNavigation('courses');
+              onNavigateToCourse={(course) => {
+                setDetailCourse(course);
+                setDetailJob(null);
+                handleScreenNavigation('details');
               }}
               onBack={() => handleGoBack('home')}
               applications={applications}
@@ -2833,6 +2980,7 @@ export default function App() {
               course={detailCourse}
               userName={user?.name || 'Aluno(a) de Honra'}
               userId={user?.id}
+              isAlreadyCompleted={completedCourses.some(c => c.course_id === detailCourse.id)}
               onCompleteCourse={handleCompleteCourse}
               onBack={() => handleGoBack('courses')}
               onToggleLessonCompletion={handleToggleLessonCompletion}

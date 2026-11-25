@@ -212,7 +212,7 @@ export default function CoursesSection({
                           <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-50/80">
                             <div className="flex items-center gap-1.5 text-gray-500 font-medium text-xs">
                               <Clock className="w-3.5 h-3.5 text-teal-500" />
-                              <span>{(course.duration || '').split(' ')[0] || 'N/A'} Horas</span>
+                              <span>{course.duration || 'Carga livre'}</span>
                             </div>
                             <div className="flex items-center gap-1.5 text-gray-500 font-medium text-xs">
                               <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />

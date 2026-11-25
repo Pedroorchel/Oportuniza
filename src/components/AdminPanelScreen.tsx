@@ -28,6 +28,7 @@ import { AuditLogEntry, fetchAllAuditLogs, recordAuditLog } from '../lib/auditLo
 import { sanitizeExternalUrl, isProtectedAdminEmail } from '../lib/securityValidation';
 import { updateOwn2FASetting } from '../lib/twoFactorSettingsService';
 import { toast } from '../lib/toast';
+import { resolveCoordinatesByLocation, resolveJobCoordinates } from '../lib/araucariaLocations';
 
 interface AdminPanelScreenProps {
   user: User;
@@ -157,6 +158,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
 
 
   const [showCourseModal, setShowCourseModal] = useState(false);
+  const [courseToDeactivateModal, setCourseToDeactivateModal] = useState<Course | null>(null);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [courseForm, setCourseForm] = useState({
     title: '',
@@ -762,38 +764,46 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
         .select('*');
 
       if (!error && data && Array.isArray(data) && data.length > 0) {
-        const dbJobs: Job[] = data.map((item: any) => ({
-          id: String(item.id ?? `job-${Math.random()}`),
-          title: String(item.title || 'Vaga'),
-          company: String(item.company || item.company_name || 'Empresa Cadastrada'),
-          category: String(item.category || 'Geral'),
-          description: String(item.description || ''),
-          requirements: Array.isArray(item.requirements) ? item.requirements : (typeof item.requirements === 'string' ? item.requirements.split('\n') : ['Ensino Médio']),
-          salary: String(item.salary || 'A combinar'),
-          type: String(item.type || 'CLT'),
-          isRemote: Boolean(item.is_remote || item.isRemote),
-          location: String(item.location || 'Araucária - PR'),
-          lat: item.lat ? Number(item.lat) : undefined,
-          lng: item.lng ? Number(item.lng) : undefined,
-          logo: item.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.company || 'Empresa')}&background=52A8C7&color=fff&size=128&bold=true`,
-          dateString: String(item.dateString || item.posted_date || 'Recente'),
-          color: item.color || 'border-l-[#52A8C7]',
-          startDate: item.startDate || item.start_date || undefined,
-          endDate: item.endDate || item.end_date || undefined,
-          workHours: item.workHours || item.work_hours || undefined,
-          companyAddress: item.companyAddress || item.company_address || undefined,
-          companyNeighborhood: item.companyNeighborhood || item.company_neighborhood || undefined,
-          companyContactPhone: item.companyContactPhone || item.company_contact_phone || undefined,
-          companyContactEmail: item.companyContactEmail || item.company_contact_email || undefined,
-          companyResponsibleName: item.companyResponsibleName || item.company_responsible_name || undefined,
-          companyResponsibleRole: item.companyResponsibleRole || item.company_responsible_role || undefined,
-          companyLogoUrl: item.companyLogoUrl || item.company_logo_url || item.logo || undefined,
-          cnpj: item.cnpj || undefined,
-          approvalStatus: item.approvalStatus || item.approval_status || 'accepted',
-          approvedBy: item.approvedBy || item.approved_by || undefined,
-          approvedAt: item.approvedAt || item.approved_at || undefined,
-          acceptedCandidatesCount: Number(item.acceptedCandidatesCount || item.accepted_candidates_count || 0)
-        }));
+        const dbJobs: Job[] = data.map((item: any) => {
+          const rawJob: Job = {
+            id: String(item.id ?? `job-${Math.random()}`),
+            title: String(item.title || 'Vaga'),
+            company: String(item.company || item.company_name || 'Empresa Cadastrada'),
+            category: String(item.category || 'Geral'),
+            description: String(item.description || ''),
+            requirements: Array.isArray(item.requirements) ? item.requirements : (typeof item.requirements === 'string' ? item.requirements.split('\n') : ['Ensino Médio']),
+            salary: String(item.salary || 'A combinar'),
+            type: String(item.type || 'CLT'),
+            isRemote: Boolean(item.is_remote || item.isRemote),
+            location: String(item.location || 'Araucária - PR'),
+            lat: item.lat ? Number(item.lat) : undefined,
+            lng: item.lng ? Number(item.lng) : undefined,
+            logo: item.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.company || 'Empresa')}&background=52A8C7&color=fff&size=128&bold=true`,
+            dateString: String(item.dateString || item.posted_date || 'Recente'),
+            color: item.color || 'border-l-[#52A8C7]',
+            startDate: item.startDate || item.start_date || undefined,
+            endDate: item.endDate || item.end_date || undefined,
+            workHours: item.workHours || item.work_hours || undefined,
+            companyAddress: item.companyAddress || item.company_address || undefined,
+            companyNeighborhood: item.companyNeighborhood || item.company_neighborhood || undefined,
+            companyContactPhone: item.companyContactPhone || item.company_contact_phone || undefined,
+            companyContactEmail: item.companyContactEmail || item.company_contact_email || undefined,
+            companyResponsibleName: item.companyResponsibleName || item.company_responsible_name || undefined,
+            companyResponsibleRole: item.companyResponsibleRole || item.company_responsible_role || undefined,
+            companyLogoUrl: item.companyLogoUrl || item.company_logo_url || item.logo || undefined,
+            cnpj: item.cnpj || undefined,
+            approvalStatus: item.approvalStatus || item.approval_status || 'accepted',
+            approvedBy: item.approvedBy || item.approved_by || undefined,
+            approvedAt: item.approvedAt || item.approved_at || undefined,
+            acceptedCandidatesCount: Number(item.acceptedCandidatesCount || item.accepted_candidates_count || 0)
+          };
+          const resolved = resolveJobCoordinates(rawJob);
+          return {
+            ...rawJob,
+            lat: resolved.lat,
+            lng: resolved.lng
+          };
+        });
 
         const dbIds = new Set(dbJobs.map(j => j.id));
         const filteredMock = mockJobs.filter(m => !dbIds.has(m.id));
@@ -915,8 +925,8 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
       type: 'CLT',
       isRemote: false,
       location: 'Araucária - Centro',
-      lat: '-25.5920',
-      lng: '-49.4140',
+      lat: '-25.5859',
+      lng: '-49.4047',
       startDate: today,
       endDate: in30Days.toISOString().split('T')[0],
       workHours: '08:00 às 17:00 (Segunda a Sexta)',
@@ -935,6 +945,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
     const today = new Date().toISOString().split('T')[0];
     const in30Days = new Date();
     in30Days.setDate(in30Days.getDate() + 30);
+    const resolved = resolveJobCoordinates(job);
 
     setJobForm({
       title: job.title,
@@ -946,8 +957,8 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
       type: job.type,
       isRemote: job.isRemote,
       location: job.location,
-      lat: job.lat?.toString() || '',
-      lng: job.lng?.toString() || '',
+      lat: resolved.lat.toString(),
+      lng: resolved.lng.toString(),
       startDate: job.startDate || today,
       endDate: job.endDate || in30Days.toISOString().split('T')[0],
       workHours: job.workHours || '08:00 às 17:00 (Segunda a Sexta)',
@@ -1090,17 +1101,44 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
   const handleSaveJobSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!jobForm.title || !jobForm.company) {
-      alert('Por favor, preencha o título e a empresa.');
+      const msg = 'Por favor, preencha o título e a empresa.';
+      setErrorMsg(msg);
+      toast.error(msg);
+      setTimeout(() => setErrorMsg(null), 4000);
       return;
     }
 
     if (!jobForm.startDate || !jobForm.endDate) {
-      alert('Por favor, preencha a Data de Início e a Data Final das inscrições da vaga.');
+      const msg = 'Por favor, preencha a Data de Início e a Data Final das inscrições da vaga.';
+      setErrorMsg(msg);
+      toast.error(msg);
+      setTimeout(() => setErrorMsg(null), 4000);
       return;
     }
 
+    const jobId = editingJob ? editingJob.id : `job-${Date.now()}`;
+    const parsedLat = parseFloat(jobForm.lat);
+    const parsedLng = parseFloat(jobForm.lng);
+    const isDefaultPlaceholder =
+      (Math.abs(parsedLat - -25.5859) < 0.0001 && Math.abs(parsedLng - -49.4047) < 0.0001) ||
+      (Math.abs(parsedLat - -25.5920) < 0.0001 && Math.abs(parsedLng - -49.4140) < 0.0001);
+    const locationMentionsCentro = (jobForm.location || '').toLowerCase().includes('centro') && !(jobForm.location || '').toLowerCase().includes('curitiba');
+
+    const resolvedCoords =
+      Number.isFinite(parsedLat) &&
+      Number.isFinite(parsedLng) &&
+      !(isDefaultPlaceholder && !locationMentionsCentro)
+        ? { lat: parsedLat, lng: parsedLng }
+        : resolveCoordinatesByLocation({
+            id: jobId,
+            location: jobForm.location,
+            address: jobForm.companyAddress,
+            isRemote: jobForm.isRemote,
+            spread: true,
+          });
+
     const jobData: Job = {
-      id: editingJob ? editingJob.id : `job-${Date.now()}`,
+      id: jobId,
       title: jobForm.title,
       company: jobForm.company,
       category: jobForm.category,
@@ -1110,8 +1148,8 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
       type: jobForm.type,
       isRemote: jobForm.isRemote,
       location: jobForm.location,
-      lat: jobForm.lat ? parseFloat(jobForm.lat) : undefined,
-      lng: jobForm.lng ? parseFloat(jobForm.lng) : undefined,
+      lat: resolvedCoords.lat,
+      lng: resolvedCoords.lng,
       logo: jobForm.companyLogoUrl || (editingJob ? editingJob.logo : `https://ui-avatars.com/api/?name=${encodeURIComponent(jobForm.company)}&background=52A8C7&color=fff&size=128&bold=true`),
       dateString: editingJob ? editingJob.dateString : 'Hoje',
       color: 'border-l-[#52A8C7]',
@@ -1186,9 +1224,7 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
     const isCurrentlyActive = course.active !== false;
     
     if (isCurrentlyActive) {
-      if (window.confirm(`Deseja desativar o curso de capacitação "${course.title}"? Ele ficará oculto para os alunos.`)) {
-        handleToggleCourseActive(id);
-      }
+      setCourseToDeactivateModal(course);
     } else {
       handleToggleCourseActive(id);
     }
@@ -1213,7 +1249,10 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
   const handleSaveCourseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseForm.title) {
-      alert('Por favor, insira um título para o curso.');
+      const msg = 'Por favor, insira um título para o curso.';
+      setErrorMsg(msg);
+      toast.error(msg);
+      setTimeout(() => setErrorMsg(null), 4000);
       return;
     }
 
@@ -4684,26 +4723,54 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/80 rounded-2xl border border-slate-800/80">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Latitude do Mapa (opcional)</label>
-                    <input 
-                      type="text" 
-                      value={jobForm.lat} 
-                      onChange={e => setJobForm({...jobForm, lat: e.target.value})}
-                      placeholder="-25.5920"
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#52A8C7] rounded-xl px-3 py-2 text-xs focus:outline-none text-slate-300"
-                    />
+                <div className="p-3 bg-slate-950/80 rounded-2xl border border-slate-800/80 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">
+                      Coordenadas do Mapa
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const resolved = resolveCoordinatesByLocation({
+                          id: editingJob?.id || jobForm.title || 'admin-job',
+                          location: jobForm.location,
+                          address: jobForm.companyAddress,
+                          isRemote: jobForm.isRemote,
+                          spread: true,
+                        });
+                        setJobForm({
+                          ...jobForm,
+                          lat: resolved.lat.toString(),
+                          lng: resolved.lng.toString(),
+                        });
+                        toast.success(`Coordenadas ajustadas para ${jobForm.location || 'o endereço informado'}.`);
+                      }}
+                      className="px-2.5 py-1 bg-[#52A8C7]/15 hover:bg-[#52A8C7]/25 text-[#52A8C7] rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <MapPin className="w-3 h-3" /> Auto-preencher pelo local
+                    </button>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Longitude do Mapa (opcional)</label>
-                    <input 
-                      type="text" 
-                      value={jobForm.lng} 
-                      onChange={e => setJobForm({...jobForm, lng: e.target.value})}
-                      placeholder="-49.4140"
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#52A8C7] rounded-xl px-3 py-2 text-xs focus:outline-none text-slate-300"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Latitude do Mapa (opcional)</label>
+                      <input 
+                        type="text" 
+                        value={jobForm.lat} 
+                        onChange={e => setJobForm({...jobForm, lat: e.target.value})}
+                        placeholder="-25.5859"
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-[#52A8C7] rounded-xl px-3 py-2 text-xs focus:outline-none text-slate-300"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Longitude do Mapa (opcional)</label>
+                      <input 
+                        type="text" 
+                        value={jobForm.lng} 
+                        onChange={e => setJobForm({...jobForm, lng: e.target.value})}
+                        placeholder="-49.4047"
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-[#52A8C7] rounded-xl px-3 py-2 text-xs focus:outline-none text-slate-300"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -5474,6 +5541,46 @@ export default function AdminPanelScreen({ user, onLogout, onUpdateUser }: Admin
                   className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3 rounded-xl text-xs transition-colors cursor-pointer text-center"
                 >
                   Fechar Ficha Cadastral
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {courseToDeactivateModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Desativar curso?</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Deseja desativar o curso de capacitação <strong className="text-white">"{courseToDeactivateModal.title}"</strong>? Ele ficará oculto para os alunos até ser reativado.
+                </p>
+              </div>
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCourseToDeactivateModal(null)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleToggleCourseActive(courseToDeactivateModal.id);
+                    setCourseToDeactivateModal(null);
+                  }}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  Desativar Curso
                 </button>
               </div>
             </motion.div>

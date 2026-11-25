@@ -1157,6 +1157,17 @@ export default function AuthScreen({
       });
 
       if (!rpcErr && rpcSaved) {
+        if (
+          typeof fullPayload.is_2fa_enabled === 'boolean' &&
+          typeof (rpcSaved as any).is_2fa_enabled === 'boolean' &&
+          (rpcSaved as any).is_2fa_enabled !== fullPayload.is_2fa_enabled
+        ) {
+          try {
+            await supabase.rpc('set_my_2fa_enabled', {
+              p_enabled: Boolean(fullPayload.is_2fa_enabled)
+            });
+          } catch {}
+        }
         return;
       }
 
